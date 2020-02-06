@@ -1,0 +1,23 @@
+[package]
+name = "status"
+version = "0.1.0"
+authors = ["Andrei Nesterov <ae.nesterov@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+env_logger = "0.6"
+config = "0.9"
+futures = { version = "0.3", features = ["thread-pool"] }
+futures-channel = "0.3"
+futures-timer = "1.0"
+failure = "0.1"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+surf = "1.0"
+svc-agent = { version = "0.11" }
+svc-authn = { version = "0.5", features = ["jose"] }

@@ -1,0 +1,26 @@
+id = "status.svc.example.org"
+agent_label = "alpha"
+broker_id = "mqtt-gateway.svc.example.org"
+
+[id_token]
+algorithm = "ES256"
+key = "data/keys/svc.private_key.p8.der.sample"
+
+[authz."example.net"]
+type = "http"
+uri = "https://iam.example.net/authz"
+algorithm = "ES256"
+key = "data/keys/svc.private_key.p8.der.sample"
+
+[authz."svc.example.org"]
+type = "local"
+trusted = ["cron.svc.example.org"]
+
+[mqtt]
+uri = "mqtt://192.168.99.100:1883"
+clean_session = false
+
+[topmind]
+uri = "https://endpoint"
+token = "secret"
+timeout = 5
