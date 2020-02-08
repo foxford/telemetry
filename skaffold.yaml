@@ -1,0 +1,20 @@
+apiVersion: skaffold/v1beta11
+kind: Config
+build:
+  artifacts:
+    - image: netologygroup/status
+      docker:
+        dockerfile: docker/Dockerfile
+  tagPolicy:
+    envTemplate:
+      template: '{{.IMAGE_NAME}}:{{.IMAGE_TAG}}'
+  local:
+    push: true
+    useDockerCLI: true
+deploy:
+  kubectl:
+    manifests:
+      - deploy/k8s/status.yaml
+      - deploy/k8s/status-config.yaml
+      - deploy/k8s/status-environment.yaml
+      - deploy/k8s/status-headless.yaml

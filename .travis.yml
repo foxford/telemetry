@@ -1,0 +1,42 @@
+language: rust
+rust:
+  - stable
+# addons:
+#   apt:
+#     packages:
+#       - awscli
+cache:
+  directories:
+    - ${TRAVIS_HOME}/.cargo
+before_cache:
+  - rm -rf ${TRAVIS_HOME}/.cargo/registry
+services:
+  - docker
+git:
+  depth: 1
+jobs:
+  include:
+    - stage: check
+      name: Tests
+      script: cargo test
+    - stage: check
+      name : Rustfmt
+      install: rustup component add rustfmt
+      script: cargo fmt -- --check
+   - stage: check
+     name: Clippy
+     install: rustup component add clippy
+     script: cargo clippy
+    # - stage: check
+    #   name: Docs
+    #   install: cargo install mdbook --vers 0.3.5 --force
+    #   script: mdbook build docs && ./deploy.init.sh && PROJECT='status' ./deploy/s3-docs.sh
+    - stage: deploy
+      name: Kubernetes
+      script: ./deploy.init.sh && ./deploy/travis-run.sh
+stages:
+  - name: check
+  - name: deploy
+    if: (branch = master AND type = push) OR tag IS present
+notifications:
+  email: false
