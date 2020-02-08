@@ -21,3 +21,4 @@ chrono = { version = "0.4", features = ["serde"] }
 surf = "1.0"
 svc-agent = { version = "0.11" }
 svc-authn = { version = "0.5", features = ["jose"] }
+svc-error = { version = "0.1", features = ["svc-agent", "svc-authn", "sentry-extension"] }

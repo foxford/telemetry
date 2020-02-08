@@ -104,6 +104,11 @@ pub(crate) async fn run() -> Result<(), Error> {
         }
     });
 
+    // Sentry
+    if let Some(sentry_config) = config.sentry.as_ref() {
+        svc_error::extension::sentry::init(sentry_config);
+    }
+
     // Subscription
     agent
         .subscribe(&"#", QoS::AtLeastOnce, Some(&group))

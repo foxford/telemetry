@@ -9,7 +9,7 @@ pub(crate) struct Config {
     pub(crate) agent_label: String,
     pub(crate) broker_id: svc_agent::AccountId,
     pub(crate) mqtt: svc_agent::mqtt::AgentConfig,
-    // pub(crate) sentry: Option<svc_error::extension::sentry::Config>,
+    pub(crate) sentry: Option<svc_error::extension::sentry::Config>,
 }
 
 pub(crate) fn load() -> Result<Config, config::ConfigError> {
