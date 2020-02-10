@@ -30,7 +30,7 @@ jobs:
     # - stage: check
     #   name: Docs
     #   install: cargo install mdbook --vers 0.3.5 --force
-    #   script: mdbook build docs && ./deploy.init.sh && PROJECT='status' ./deploy/s3-docs.sh
+    #   script: mdbook build docs && ./deploy.init.sh && PROJECT='telemetry' ./deploy/s3-docs.sh
     - stage: deploy
       name: Kubernetes
       script: ./deploy.init.sh && ./deploy/travis-run.sh

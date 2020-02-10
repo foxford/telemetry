@@ -1862,27 +1862,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
-name = "status"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "config",
- "env_logger",
- "failure",
- "futures 0.3.4",
- "futures-channel",
- "futures-timer",
- "log",
- "serde 1.0.104",
- "serde_derive",
- "serde_json",
- "surf",
- "svc-agent",
- "svc-authn",
- "svc-error",
-]
-
-[[package]]
 name = "string"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1993,6 +1972,27 @@ dependencies = [
  "quote 1.0.2",
  "syn 1.0.14",
  "unicode-xid 0.2.0",
+]
+
+[[package]]
+name = "telemetry"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "config",
+ "env_logger",
+ "failure",
+ "futures 0.3.4",
+ "futures-channel",
+ "futures-timer",
+ "log",
+ "serde 1.0.104",
+ "serde_derive",
+ "serde_json",
+ "surf",
+ "svc-agent",
+ "svc-authn",
+ "svc-error",
 ]
 
 [[package]]

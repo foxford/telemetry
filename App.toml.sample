@@ -1,4 +1,4 @@
-id = "status.svc.example.org"
+id = "telemetry.svc.example.org"
 agent_label = "alpha"
 broker_id = "mqtt-gateway.svc.example.org"
 

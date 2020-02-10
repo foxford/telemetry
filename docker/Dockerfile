@@ -12,7 +12,7 @@ RUN cargo build --release
 ## -----------------------------------------------------------------------------
 FROM alpine
 
-COPY --from=build-stage "/build/target/x86_64-unknown-linux-musl/release/status" "/app/status"
+COPY --from=build-stage "/build/target/x86_64-unknown-linux-musl/release/telemetry" "/app/telemetry"
 
 WORKDIR "/app"
-ENTRYPOINT ["/app/status"]
+ENTRYPOINT ["/app/telemetry"]
