@@ -38,11 +38,15 @@ pub(crate) struct TopMindConfig {
 #[derive(Debug, Serialize)]
 struct TopMindRequest {
     properties: JsonValue,
+    payload: JsonValue,
 }
 
 impl TopMindRequest {
-    fn new(properties: JsonValue) -> Self {
-        Self { properties }
+    fn new(properties: JsonValue, payload: JsonValue) -> Self {
+        Self {
+            properties,
+            payload,
+        }
     }
 }
 
@@ -153,15 +157,19 @@ pub(crate) async fn run() -> Result<(), Error> {
 
 async fn handle_message(payload: Arc<Vec<u8>>, topmind: Arc<TopMindConfig>) -> Result<(), Error> {
     let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())?;
+    let payload = envelope.payload::<JsonValue>()?;
     match envelope.properties() {
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
-            send(TopMindRequest::new(serde_json::to_value(reqp)?), topmind).await
+            let props = serde_json::to_value(reqp)?;
+            send(TopMindRequest::new(props, payload), topmind).await
         }
         compat::IncomingEnvelopeProperties::Response(ref resp) => {
-            send(TopMindRequest::new(serde_json::to_value(resp)?), topmind).await
+            let props = serde_json::to_value(resp)?;
+            send(TopMindRequest::new(props, payload), topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
-            send(TopMindRequest::new(serde_json::to_value(evp)?), topmind).await
+            let props = serde_json::to_value(evp)?;
+            send(TopMindRequest::new(props, payload), topmind).await
         }
     }
 }
