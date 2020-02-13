@@ -13,7 +13,7 @@ use log::{error, info};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use svc_agent::mqtt::{compat, AgentBuilder, ConnectionMode, Notification, QoS};
-use svc_agent::{AgentId, Authenticable, SharedGroup};
+use svc_agent::{AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
 
 pub(crate) const API_VERSION: &str = "v1";
@@ -115,7 +115,11 @@ pub(crate) async fn run() -> Result<(), Error> {
 
     // Subscription
     agent
-        .subscribe(&"#", QoS::AtLeastOnce, Some(&group))
+        .subscribe(
+            &Subscription::multicast_requests(Some(API_VERSION)),
+            QoS::AtMostOnce,
+            Some(&group),
+        )
         .expect("Error subscribing to everyone's output messages");
 
     // Thread Pool
