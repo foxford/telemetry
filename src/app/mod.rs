@@ -11,12 +11,13 @@ use futures::{
     StreamExt,
 };
 use futures_timer::Delay;
-use log::{error, info};
+use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use svc_agent::mqtt::{compat, AgentBuilder, ConnectionMode, Notification, QoS};
+use svc_agent::mqtt::{compat, AgentBuilder, ConnectionMode, Notification, QoS, ResponseStatus};
 use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
+use svc_error::extension::sentry;
 
 pub(crate) const API_VERSION: &str = "v1";
 
@@ -290,7 +291,17 @@ pub(crate) async fn run() -> Result<(), Error> {
                             text = String::from_utf8_lossy(message.payload.as_slice()),
                             topic = topic,
                             detail = err,
-                        )
+                        );
+
+                        // Send to the Sentry
+                        let svc_error = svc_error::Error::builder()
+                            .kind("topmind.wapi", "Error publishing a message to the TopMind W API")
+                            .status(ResponseStatus::UNPROCESSABLE_ENTITY)
+                            .detail(&err.to_string())
+                            .build();
+
+                        sentry::send(svc_error)
+                            .unwrap_or_else(|err| warn!("Error sending error to Sentry: {}", err));
                     }
 
                     // Log incoming messages
@@ -298,7 +309,6 @@ pub(crate) async fn run() -> Result<(), Error> {
                         "Incoming message = '{}' sent to the topic = '{}', dup = '{}', pkid = '{:?}'",
                         String::from_utf8_lossy(message.payload.as_slice()), topic, message.dup, message.pkid,
                     );
-
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
