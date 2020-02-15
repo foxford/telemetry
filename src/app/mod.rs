@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 
@@ -13,7 +14,7 @@ use log::{error, info};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use svc_agent::mqtt::{compat, AgentBuilder, ConnectionMode, Notification, QoS};
-use svc_agent::{AgentId, Authenticable, SharedGroup, Subscription};
+use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
 
 pub(crate) const API_VERSION: &str = "v1";
@@ -37,13 +38,15 @@ pub(crate) struct TopMindConfig {
 
 #[derive(Debug, Serialize)]
 struct TopMindRequest {
+    pattern: MessagingPattern,
     properties: JsonValue,
     payload: JsonValue,
 }
 
 impl TopMindRequest {
-    fn new(properties: JsonValue, payload: JsonValue) -> Self {
+    fn new(pattern: MessagingPattern, properties: JsonValue, payload: JsonValue) -> Self {
         Self {
+            pattern,
             properties,
             payload,
         }
@@ -68,6 +71,147 @@ struct TopMindResponseError {
     message: String,
     #[serde(rename = "reasonPhrase")]
     reason_phrase: String,
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Serialize)]
+struct AccountAddress {
+    account_id: AccountId,
+    version: String,
+}
+
+impl AccountAddress {
+    fn new(account_id: AccountId, version: &str) -> Self {
+        Self {
+            account_id,
+            version: version.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct AgentAddress {
+    agent_id: AgentId,
+    version: String,
+}
+
+impl AgentAddress {
+    fn new(agent_id: AgentId, version: &str) -> Self {
+        Self {
+            agent_id,
+            version: version.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+#[serde(tag = "type")]
+enum MessagingPattern {
+    Broadcast(BroadcastMessagingPattern),
+    Multicast(MulticastMessagingPattern),
+    Unicast(UnicastMessagingPattern),
+}
+
+#[derive(Debug, Serialize)]
+struct BroadcastMessagingPattern {
+    from: AccountAddress,
+    path: String,
+}
+
+impl BroadcastMessagingPattern {
+    fn new(from: AccountAddress, path: &str) -> Self {
+        Self {
+            from,
+            path: path.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct MulticastMessagingPattern {
+    from: AgentId,
+    to: AccountAddress,
+}
+
+impl MulticastMessagingPattern {
+    fn new(from: AgentId, to: AccountAddress) -> Self {
+        Self { from, to }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct UnicastMessagingPattern {
+    from: AccountId,
+    to: AgentAddress,
+}
+
+impl UnicastMessagingPattern {
+    fn new(from: AccountId, to: AgentAddress) -> Self {
+        Self { from, to }
+    }
+}
+
+impl FromStr for MessagingPattern {
+    type Err = Error;
+
+    fn from_str(topic: &str) -> Result<Self, Self::Err> {
+        if topic.starts_with("apps") {
+            let arr = topic.splitn(5, '/').collect::<Vec<&str>>();
+            match &arr[..] {
+                ["apps", from_account_id, "api", ref from_version, ref path] => {
+                    let from_account_id = from_account_id.parse().map_err(|err| {
+                        format_err!("error deserializing account_id from a string, {}", &err)
+                    })?;
+                    let address = AccountAddress::new(from_account_id, from_version);
+                    let pattern =
+                        MessagingPattern::Broadcast(BroadcastMessagingPattern::new(address, path));
+                    Ok(pattern)
+                }
+                _ => Err(format_err!(
+                    "invalid value for the messaging pattern: {:?}",
+                    topic
+                )),
+            }
+        } else {
+            let arr = topic.splitn(6, '/').collect::<Vec<&str>>();
+            match &arr[..] {
+                ["agents", ref from_agent_id, "api", ref to_version, "out", ref to_account_id] => {
+                    let from_agent_id = from_agent_id.parse().map_err(|err| {
+                        format_err!("error deserializing account_id from a string, {}", &err)
+                    })?;
+                    let to_account_id = to_account_id.parse().map_err(|err| {
+                        format_err!("error deserializing account_id from a string, {}", &err)
+                    })?;
+                    let address = AccountAddress::new(to_account_id, to_version);
+                    let pattern = MessagingPattern::Multicast(MulticastMessagingPattern::new(
+                        from_agent_id,
+                        address,
+                    ));
+                    Ok(pattern)
+                }
+                ["agents", ref to_agent_id, "api", ref to_version, "in", ref from_account_id] => {
+                    let from_account_id = from_account_id.parse().map_err(|err| {
+                        format_err!("error deserializing account_id from a string, {}", &err)
+                    })?;
+                    let to_agent_id = to_agent_id.parse().map_err(|err| {
+                        format_err!("error deserializing agent_id from a string, {}", &err)
+                    })?;
+                    let address = AgentAddress::new(to_agent_id, to_version);
+                    let pattern = MessagingPattern::Unicast(UnicastMessagingPattern::new(
+                        from_account_id,
+                        address,
+                    ));
+                    Ok(pattern)
+                }
+                _ => Err(format_err!(
+                    "invalid value for the messaging pattern: {:?}",
+                    topic
+                )),
+            }
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -133,7 +277,7 @@ pub(crate) async fn run() -> Result<(), Error> {
                 svc_agent::mqtt::Notification::Publish(message) => {
                     let topic: &str = &message.topic_name;
 
-                    let result = handle_message(message.payload.clone(), topmind.clone()).await;
+                    let result = handle_message(topic, message.payload.clone(), topmind.clone()).await;
                     if let Err(err) = result {
                         error!(
                             "Error processing a message = '{text}' sent to the topic = '{topic}', {detail}",
@@ -159,21 +303,27 @@ pub(crate) async fn run() -> Result<(), Error> {
     Ok(())
 }
 
-async fn handle_message(payload: Arc<Vec<u8>>, topmind: Arc<TopMindConfig>) -> Result<(), Error> {
+async fn handle_message(
+    topic: &str,
+    payload: Arc<Vec<u8>>,
+    topmind: Arc<TopMindConfig>,
+) -> Result<(), Error> {
+    let pattern = topic.parse::<MessagingPattern>()?;
+
     let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())?;
     let payload = envelope.payload::<JsonValue>()?;
     match envelope.properties() {
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
-            let props = serde_json::to_value(reqp)?;
-            send(TopMindRequest::new(props, payload), topmind).await
+            let properties = serde_json::to_value(reqp)?;
+            send(TopMindRequest::new(pattern, properties, payload), topmind).await
         }
         compat::IncomingEnvelopeProperties::Response(ref resp) => {
-            let props = serde_json::to_value(resp)?;
-            send(TopMindRequest::new(props, payload), topmind).await
+            let properties = serde_json::to_value(resp)?;
+            send(TopMindRequest::new(pattern, properties, payload), topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
-            let props = serde_json::to_value(evp)?;
-            send(TopMindRequest::new(props, payload), topmind).await
+            let properties = serde_json::to_value(evp)?;
+            send(TopMindRequest::new(pattern, properties, payload), topmind).await
         }
     }
 }
