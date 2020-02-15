@@ -273,12 +273,14 @@ pub(crate) async fn run() -> Result<(), Error> {
 
     // Subscription
     agent
-        .subscribe(
-            &Subscription::multicast_requests(Some(API_VERSION)),
-            QoS::AtMostOnce,
-            Some(&group),
-        )
-        .expect("Error subscribing to everyone's output messages");
+        .subscribe(&"apps/+/api/+/#", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to broadcast events");
+    agent
+        .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to multicast requests and events");
+    agent
+        .subscribe(&"agents/+/api/+/in/+", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to unicast requests and responses");
 
     // Http client
     let topmind = Arc::new(config.topmind);
@@ -428,12 +430,6 @@ async fn handle_message(
 
             if topic == telemetry_topic {
                 json_flatten("payload", &envelope.payload::<JsonValue>()?, &mut acc);
-<<<<<<< HEAD
-=======
-                println!("1");
-            } else {
-                println!("0");
->>>>>>> Send payload for telemetry messages only
             }
 
             json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
