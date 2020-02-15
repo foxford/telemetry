@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
@@ -34,23 +35,6 @@ pub(crate) struct TopMindConfig {
     uri: String,
     token: String,
     timeout: Option<u64>,
-}
-
-#[derive(Debug, Serialize)]
-struct TopMindRequest {
-    pattern: MessagingPattern,
-    properties: JsonValue,
-    payload: JsonValue,
-}
-
-impl TopMindRequest {
-    fn new(pattern: MessagingPattern, properties: JsonValue, payload: JsonValue) -> Self {
-        Self {
-            pattern,
-            properties,
-            payload,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -216,6 +200,28 @@ impl FromStr for MessagingPattern {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+fn json_flatten_prefix(key: &str, prefix: &str) -> String {
+    if !prefix.is_empty() {
+        [prefix, key].join(".")
+    } else {
+        key.to_owned()
+    }
+}
+
+fn json_flatten(prefix: &str, json: &JsonValue, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(object) = json.as_object() {
+        for (key, value) in object {
+            if value.is_object() {
+                json_flatten(&json_flatten_prefix(key, prefix), value, acc);
+            } else {
+                acc.insert(json_flatten_prefix(key, prefix), value.clone());
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 pub(crate) async fn run() -> Result<(), Error> {
     // Config
     let config = config::load().map_err(|err| format_err!("Failed to load config: {}", err))?;
@@ -308,27 +314,34 @@ async fn handle_message(
     payload: Arc<Vec<u8>>,
     topmind: Arc<TopMindConfig>,
 ) -> Result<(), Error> {
+    let mut acc: HashMap<String, JsonValue> = HashMap::new();
+
     let pattern = topic.parse::<MessagingPattern>()?;
+    json_flatten("pattern", &serde_json::to_value(pattern)?, &mut acc);
 
     let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())?;
-    let payload = envelope.payload::<JsonValue>()?;
+    json_flatten("payload", &envelope.payload::<JsonValue>()?, &mut acc);
+
     match envelope.properties() {
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
-            let properties = serde_json::to_value(reqp)?;
-            send(TopMindRequest::new(pattern, properties, payload), topmind).await
+            json_flatten("properties", &serde_json::to_value(reqp)?, &mut acc);
+            let payload = serde_json::to_value(acc)?;
+            send(payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Response(ref resp) => {
-            let properties = serde_json::to_value(resp)?;
-            send(TopMindRequest::new(pattern, properties, payload), topmind).await
+            json_flatten("properties", &serde_json::to_value(resp)?, &mut acc);
+            let payload = serde_json::to_value(acc)?;
+            send(payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
-            let properties = serde_json::to_value(evp)?;
-            send(TopMindRequest::new(pattern, properties, payload), topmind).await
+            json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
+            let payload = serde_json::to_value(acc)?;
+            send(payload, topmind).await
         }
     }
 }
 
-async fn send(payload: TopMindRequest, topmind: Arc<TopMindConfig>) -> Result<(), Error> {
+async fn send(payload: JsonValue, topmind: Arc<TopMindConfig>) -> Result<(), Error> {
     let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
     let request = surf::post(&topmind.uri)
         .set_header("authorization", format!("Bearer {}", topmind.token))
