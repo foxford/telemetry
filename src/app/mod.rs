@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 
+use chrono::Utc;
 use failure::{err_msg, format_err, Error};
 use futures::{
     executor::ThreadPoolBuilder,
@@ -280,24 +281,28 @@ pub(crate) async fn run() -> Result<(), Error> {
     while let Some(message) = mq_rx.next().await {
         let topmind = topmind.clone();
         thread_pool.spawn(async move {
+            let start_time = Utc::now();
             match message {
                 svc_agent::mqtt::Notification::Publish(message) => {
                     let topic: &str = &message.topic_name;
 
                     let result = handle_message(topic, message.payload.clone(), topmind.clone()).await;
                     if let Err(err) = result {
+                        let processing_time = Utc::now() - start_time;
+                        let detail = format!("{}, within time = {} ms", err, processing_time.num_milliseconds());
+
                         error!(
                             "Error processing a message = '{text}' sent to the topic = '{topic}', {detail}",
                             text = String::from_utf8_lossy(message.payload.as_slice()),
                             topic = topic,
-                            detail = err,
+                            detail = detail,
                         );
 
                         // Send to the Sentry
                         let svc_error = svc_error::Error::builder()
                             .kind("topmind.wapi", "Error publishing a message to the TopMind W API")
                             .status(ResponseStatus::UNPROCESSABLE_ENTITY)
-                            .detail(&err.to_string())
+                            .detail(&detail)
                             .build();
 
                         sentry::send(svc_error)
@@ -305,10 +310,10 @@ pub(crate) async fn run() -> Result<(), Error> {
                     }
 
                     // Log incoming messages
-                    info!(
-                        "Incoming message = '{}' sent to the topic = '{}', dup = '{}', pkid = '{:?}'",
-                        String::from_utf8_lossy(message.payload.as_slice()), topic, message.dup, message.pkid,
-                    );
+                    // info!(
+                    //     "Incoming message = '{}' sent to the topic = '{}', dup = '{}', pkid = '{:?}'",
+                    //     String::from_utf8_lossy(message.payload.as_slice()), topic, message.dup, message.pkid,
+                    // );
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
@@ -360,15 +365,20 @@ async fn send(payload: JsonValue, topmind: Arc<TopMindConfig>) -> Result<(), Err
     match request {
         Ok(req) => match future::select(req, Delay::new(timeout)).await {
             Either::Left((Ok(mut resp), _)) => match resp.body_json::<TopMindResponse>().await {
-                Ok(TopMindResponse::Success(data)) => {
-                    info!("reponse = {:#?}", &data);
-                    Ok(())
-                }
+                Ok(TopMindResponse::Success(_data)) => Ok(()),
                 Ok(TopMindResponse::Error(data)) => Err(format_err!(
                     "TopMind responded with the error, reason = {}",
                     &data.reason_phrase
                 )),
-                Err(_) => Err(err_msg("invalid format of the TopMind response")),
+                Err(_) => match resp.body_string().await {
+                    Ok(data) => Err(format_err!(
+                        "invalid format of the TopMind response, received data = '{}'",
+                        data
+                    )),
+                    Err(_) => Err(err_msg(
+                        "invalid format of the TopMind response, received data isn't even a string",
+                    )),
+                },
             },
             Either::Left((Err(err), _)) => {
                 Err(format_err!("error sending the TopMind request, {}", &err))
