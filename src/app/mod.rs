@@ -1,3 +1,4 @@
+use async_std::task;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -6,9 +7,7 @@ use std::thread;
 use chrono::Utc;
 use failure::{err_msg, format_err, Error};
 use futures::{
-    executor::ThreadPoolBuilder,
     future::{self, Either},
-    task::SpawnExt,
     StreamExt,
 };
 use futures_timer::Delay;
@@ -274,22 +273,24 @@ pub(crate) async fn run() -> Result<(), Error> {
         )
         .expect("Error subscribing to everyone's output messages");
 
-    // Thread Pool
-    let thread_pool = ThreadPoolBuilder::new().create()?;
-
     let topmind = Arc::new(config.topmind);
     while let Some(message) = mq_rx.next().await {
         let topmind = topmind.clone();
-        thread_pool.spawn(async move {
+        task::spawn(async move {
             let start_time = Utc::now();
             match message {
                 svc_agent::mqtt::Notification::Publish(message) => {
                     let topic: &str = &message.topic_name;
 
-                    let result = handle_message(topic, message.payload.clone(), topmind.clone()).await;
+                    let result =
+                        handle_message(topic, message.payload.clone(), topmind.clone()).await;
                     if let Err(err) = result {
                         let processing_time = Utc::now() - start_time;
-                        let detail = format!("{}, within time = {} ms", err, processing_time.num_milliseconds());
+                        let detail = format!(
+                            "{}, within time = {} ms",
+                            err,
+                            processing_time.num_milliseconds()
+                        );
 
                         error!(
                             "Error processing a message = '{text}' sent to the topic = '{topic}', {detail}",
@@ -300,7 +301,10 @@ pub(crate) async fn run() -> Result<(), Error> {
 
                         // Send to the Sentry
                         let svc_error = svc_error::Error::builder()
-                            .kind("topmind.wapi", "Error publishing a message to the TopMind W API")
+                            .kind(
+                                "topmind.wapi",
+                                "Error publishing a message to the TopMind W API",
+                            )
                             .status(ResponseStatus::UNPROCESSABLE_ENTITY)
                             .detail(&detail)
                             .build();
@@ -317,8 +321,7 @@ pub(crate) async fn run() -> Result<(), Error> {
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
-
-        }).unwrap();
+        });
     }
 
     Ok(())

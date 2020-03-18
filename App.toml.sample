@@ -17,7 +17,7 @@ type = "local"
 trusted = ["cron.svc.example.org"]
 
 [mqtt]
-uri = "mqtt://192.168.99.100:1883"
+uri = "mqtt://127.0.0.1:1883"
 clean_session = false
 
 [topmind]

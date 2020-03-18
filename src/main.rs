@@ -1,8 +1,12 @@
-use futures::executor;
+use std::io::{Error, ErrorKind};
 
-fn main() {
+#[async_std::main]
+async fn main() -> std::io::Result<()> {
     env_logger::init();
-    executor::block_on(app::run()).expect("Error running an executor");
+
+    app::run()
+        .await
+        .map_err(|err| Error::new(ErrorKind::Other, err))
 }
 
 mod app;
