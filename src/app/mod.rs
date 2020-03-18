@@ -1,15 +1,17 @@
-use async_std::task;
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::thread;
-
-use chrono::Utc;
-use failure::{err_msg, format_err, Error};
-use futures::{
-    future::{self, Either},
-    StreamExt,
+use async_std::{prelude::StreamExt, stream, task};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    thread,
+    time::{Duration, SystemTime},
 };
+
+use failure::{err_msg, format_err, Error};
+use futures::future::{self, Either};
 use futures_timer::Delay;
 use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
@@ -273,30 +275,34 @@ pub(crate) async fn run() -> Result<(), Error> {
         )
         .expect("Error subscribing to everyone's output messages");
 
+    // Throughput counters
+    let incoming_throughput: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    let outgoing_throughput: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    task::spawn(reset(
+        incoming_throughput.clone(),
+        outgoing_throughput.clone(),
+    ));
+
     let topmind = Arc::new(config.topmind);
     while let Some(message) = mq_rx.next().await {
+        incoming_throughput.fetch_add(1, Ordering::SeqCst);
+        let outgoing_throughput = outgoing_throughput.clone();
+
         let topmind = topmind.clone();
         task::spawn(async move {
-            let start_time = Utc::now();
             match message {
                 svc_agent::mqtt::Notification::Publish(message) => {
                     let topic: &str = &message.topic_name;
 
                     let result =
                         handle_message(topic, message.payload.clone(), topmind.clone()).await;
-                    if let Err(err) = result {
-                        let processing_time = Utc::now() - start_time;
-                        let detail = format!(
-                            "{}, within time = {} ms",
-                            err,
-                            processing_time.num_milliseconds()
-                        );
 
+                    if let Err(err) = result {
                         error!(
                             "Error processing a message = '{text}' sent to the topic = '{topic}', {detail}",
                             text = String::from_utf8_lossy(message.payload.as_slice()),
                             topic = topic,
-                            detail = detail,
+                            detail = err,
                         );
 
                         // Send to the Sentry
@@ -306,11 +312,13 @@ pub(crate) async fn run() -> Result<(), Error> {
                                 "Error publishing a message to the TopMind W API",
                             )
                             .status(ResponseStatus::UNPROCESSABLE_ENTITY)
-                            .detail(&detail)
+                            .detail(&err.to_string())
                             .build();
 
                         sentry::send(svc_error)
                             .unwrap_or_else(|err| warn!("Error sending error to Sentry: {}", err));
+                    } else {
+                        outgoing_throughput.fetch_add(1, Ordering::SeqCst);
                     }
 
                     // Log incoming messages
@@ -322,6 +330,28 @@ pub(crate) async fn run() -> Result<(), Error> {
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
         });
+    }
+
+    Ok(())
+}
+
+async fn reset(
+    incoming: Arc<AtomicUsize>,
+    outgoing: Arc<AtomicUsize>,
+) -> Result<(), std::io::Error> {
+    let mut interval = stream::interval(Duration::from_secs(1));
+    while let Some(_) = interval.next().await {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        println!(
+            "throughput {}: {} => {}",
+            now,
+            incoming.swap(0, Ordering::SeqCst),
+            outgoing.swap(0, Ordering::SeqCst)
+        );
     }
 
     Ok(())
