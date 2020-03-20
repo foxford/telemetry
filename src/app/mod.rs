@@ -277,6 +277,9 @@ pub(crate) async fn run() -> Result<(), Error> {
         )
         .expect("Error subscribing to everyone's output messages");
 
+    // Http client
+    let client = Arc::new(isahc::HttpClient::new()?);
+
     // Throughput counters
     let incoming_throughput = Arc::new(AtomicUsize::new(0));
     let outgoing_throughput = Arc::new(AtomicUsize::new(0));
@@ -293,6 +296,7 @@ pub(crate) async fn run() -> Result<(), Error> {
         incoming_throughput.fetch_add(1, Ordering::SeqCst);
         let outgoing_throughput = outgoing_throughput.clone();
         let latency = latency.clone();
+        let client = client.clone();
 
         let topmind = topmind.clone();
         task::spawn(async move {
@@ -301,7 +305,8 @@ pub(crate) async fn run() -> Result<(), Error> {
                     let topic: &str = &message.topic_name;
 
                     let result =
-                        handle_message(topic, message.payload.clone(), topmind.clone()).await;
+                        handle_message(&client, topic, message.payload.clone(), topmind.clone())
+                            .await;
 
                     if let Err(err) = result {
                         error!(
@@ -378,6 +383,7 @@ async fn reset(
 }
 
 async fn handle_message(
+    client: &isahc::HttpClient,
     topic: &str,
     payload: Arc<Vec<u8>>,
     topmind: Arc<TopMindConfig>,
@@ -394,51 +400,56 @@ async fn handle_message(
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
             json_flatten("properties", &serde_json::to_value(reqp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
-            send(payload, topmind).await
+            send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Response(ref resp) => {
             json_flatten("properties", &serde_json::to_value(resp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
-            send(payload, topmind).await
+            send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
             json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
-            send(payload, topmind).await
+            send(&client, payload, topmind).await
         }
     }
 }
 
-async fn send(payload: JsonValue, topmind: Arc<TopMindConfig>) -> Result<(), Error> {
-    let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
-    let request = surf::post(&topmind.uri)
-        .set_header("authorization", format!("Bearer {}", topmind.token))
-        .body_json(&payload);
+async fn send(
+    client: &isahc::HttpClient,
+    payload: JsonValue,
+    topmind: Arc<TopMindConfig>,
+) -> Result<(), Error> {
+    use isahc::prelude::*;
 
-    match request {
-        Ok(req) => match future::select(req, Delay::new(timeout)).await {
-            Either::Left((Ok(mut resp), _)) => match resp.body_json::<TopMindResponse>().await {
+    let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
+    let body = serde_json::to_string(&payload)
+        .map_err(|err| format_err!("failed to build TopMind request, {}", err))?;
+    let req = Request::post(&topmind.uri)
+        .header("authorization", format!("Bearer {}", topmind.token))
+        .body(body)?;
+
+    match future::select(client.send_async(req), Delay::new(timeout)).await {
+        Either::Left((Ok(mut resp), _)) => match resp.text_async().await {
+            Ok(data) => match serde_json::from_str::<TopMindResponse>(&data) {
                 Ok(TopMindResponse::Success(_data)) => Ok(()),
                 Ok(TopMindResponse::Error(data)) => Err(format_err!(
                     "TopMind responded with the error, reason = {}",
                     &data.reason_phrase
                 )),
-                Err(_) => match resp.body_string().await {
-                    Ok(data) => Err(format_err!(
-                        "invalid format of the TopMind response, received data = '{}'",
-                        data
-                    )),
-                    Err(_) => Err(err_msg(
-                        "invalid format of the TopMind response, received data isn't even a string",
-                    )),
-                },
+                Err(_) => Err(format_err!(
+                    "invalid format of the TopMind response, received data = '{}'",
+                    data
+                )),
             },
-            Either::Left((Err(err), _)) => {
-                Err(format_err!("error sending the TopMind request, {}", &err))
-            }
-            Either::Right((_, _)) => Err(err_msg("timed out sending the TopMind request")),
+            Err(_) => Err(err_msg(
+                "invalid format of the TopMind response, received data isn't even a string",
+            )),
         },
-        Err(err) => Err(format_err!("failed to build TopMind request, {}", &err)),
+        Either::Left((Err(err), _)) => {
+            Err(format_err!("error sending the TopMind request, {}", &err))
+        }
+        Either::Right((_, _)) => Err(err_msg("timed out sending the TopMind request")),
     }
 }
 
