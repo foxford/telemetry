@@ -427,6 +427,8 @@ async fn send(
         .map_err(|err| format_err!("failed to build TopMind request, {}", err))?;
     let req = Request::post(&topmind.uri)
         .header("authorization", format!("Bearer {}", topmind.token))
+        .header("content-type", "application/json")
+        .header("user-agent", "telemetry")
         .body(body)?;
 
     match future::select(client.send_async(req), Delay::new(timeout)).await {
