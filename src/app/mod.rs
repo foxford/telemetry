@@ -336,10 +336,10 @@ pub(crate) async fn run() -> Result<(), Error> {
                     }
 
                     // Log incoming messages
-                    // info!(
-                    //     "Incoming message = '{}' sent to the topic = '{}', dup = '{}', pkid = '{:?}'",
-                    //     String::from_utf8_lossy(message.payload.as_slice()), topic, message.dup, message.pkid,
-                    // );
+                    info!(
+                        "Incoming message = '{}' sent to the topic = '{}', dup = '{}', pkid = '{:?}'",
+                        String::from_utf8_lossy(message.payload.as_slice()), topic, message.dup, message.pkid,
+                    );
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
