@@ -12,9 +12,10 @@ use std::{
 
 use chrono::Utc;
 use failure::{err_msg, format_err, Error};
-use futures::future::{self, Either};
-use futures_timer::Delay;
+// use futures::future::{self, Either};
+// use futures_timer::Delay;
 use histogram::Histogram;
+use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -278,7 +279,14 @@ pub(crate) async fn run() -> Result<(), Error> {
         .expect("Error subscribing to everyone's output messages");
 
     // Http client
-    let client = Arc::new(isahc::HttpClient::new()?);
+    let topmind = Arc::new(config.topmind);
+    let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
+    let client = Arc::new(
+        HttpClient::builder()
+            .version_negotiation(VersionNegotiation::http11())
+            .timeout(timeout)
+            .build()?,
+    );
 
     // Throughput counters
     let incoming_throughput = Arc::new(AtomicUsize::new(0));
@@ -290,7 +298,6 @@ pub(crate) async fn run() -> Result<(), Error> {
         latency.clone(),
     ));
 
-    let topmind = Arc::new(config.topmind);
     while let Some(message) = mq_rx.next().await {
         let start_time = Utc::now();
         incoming_throughput.fetch_add(1, Ordering::SeqCst);
@@ -383,7 +390,7 @@ async fn reset(
 }
 
 async fn handle_message(
-    client: &isahc::HttpClient,
+    client: &HttpClient,
     topic: &str,
     payload: Arc<Vec<u8>>,
     topmind: Arc<TopMindConfig>,
@@ -416,13 +423,12 @@ async fn handle_message(
 }
 
 async fn send(
-    client: &isahc::HttpClient,
+    client: &HttpClient,
     payload: JsonValue,
     topmind: Arc<TopMindConfig>,
 ) -> Result<(), Error> {
     use isahc::prelude::*;
 
-    let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
     let body = serde_json::to_string(&payload)
         .map_err(|err| format_err!("failed to build TopMind request, {}", err))?;
     let req = Request::post(&topmind.uri)
@@ -431,8 +437,8 @@ async fn send(
         .header("user-agent", "telemetry")
         .body(body)?;
 
-    match future::select(client.send_async(req), Delay::new(timeout)).await {
-        Either::Left((Ok(mut resp), _)) => match resp.text_async().await {
+    match client.send_async(req).await {
+        Ok(mut resp) => match resp.text_async().await {
             Ok(data) => match serde_json::from_str::<TopMindResponse>(&data) {
                 Ok(TopMindResponse::Success(_data)) => Ok(()),
                 Ok(TopMindResponse::Error(data)) => Err(format_err!(
@@ -448,10 +454,7 @@ async fn send(
                 "invalid format of the TopMind response, received data isn't even a string",
             )),
         },
-        Either::Left((Err(err), _)) => {
-            Err(format_err!("error sending the TopMind request, {}", &err))
-        }
-        Either::Right((_, _)) => Err(err_msg("timed out sending the TopMind request")),
+        Err(err) => Err(format_err!("error sending the TopMind request, {}", &err)),
     }
 }
 
