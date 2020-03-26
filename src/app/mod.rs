@@ -428,6 +428,12 @@ async fn handle_message(
 
             if topic == telemetry_topic {
                 json_flatten("payload", &envelope.payload::<JsonValue>()?, &mut acc);
+<<<<<<< HEAD
+=======
+                println!("1");
+            } else {
+                println!("0");
+>>>>>>> Send payload for telemetry messages only
             }
 
             json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
