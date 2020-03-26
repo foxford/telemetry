@@ -4,8 +4,15 @@
 FROM clux/muslrust:stable as build-stage
 
 WORKDIR "/build"
-COPY . .
+
+# Build dependencies.
+COPY Cargo.* /build/
+RUN mkdir /build/src && echo "fn main() {}" > /build/src/main.rs
 RUN cargo build --release
+
+# Build app.
+COPY src/ /build/src/
+RUN touch src/main.rs && cargo build --release
 
 ## -----------------------------------------------------------------------------
 ## Package
