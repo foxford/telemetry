@@ -19,7 +19,9 @@ use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use svc_agent::mqtt::{compat, AgentBuilder, ConnectionMode, Notification, QoS, ResponseStatus};
+use svc_agent::mqtt::{
+    compat, AgentBuilder, ConnectionMode, Notification, QoS, ResponseStatus, SubscriptionTopic,
+};
 use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
 use svc_error::extension::sentry;
@@ -304,6 +306,7 @@ pub(crate) async fn run() -> Result<(), Error> {
         let outgoing_throughput = outgoing_throughput.clone();
         let latency = latency.clone();
         let client = client.clone();
+        let agent_id = agent_id.clone();
 
         let topmind = topmind.clone();
         task::spawn(async move {
@@ -311,9 +314,14 @@ pub(crate) async fn run() -> Result<(), Error> {
                 svc_agent::mqtt::Notification::Publish(message) => {
                     let topic: &str = &message.topic_name;
 
-                    let result =
-                        handle_message(&client, topic, message.payload.clone(), topmind.clone())
-                            .await;
+                    let result = handle_message(
+                        &client,
+                        &agent_id,
+                        topic,
+                        message.payload.clone(),
+                        topmind.clone(),
+                    )
+                    .await;
 
                     if let Err(err) = result {
                         error!(
@@ -391,6 +399,7 @@ async fn reset(
 
 async fn handle_message(
     client: &HttpClient,
+    agent_id: &AgentId,
     topic: &str,
     payload: Arc<Vec<u8>>,
     topmind: Arc<TopMindConfig>,
@@ -401,8 +410,6 @@ async fn handle_message(
     json_flatten("pattern", &serde_json::to_value(pattern)?, &mut acc);
 
     let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())?;
-    json_flatten("payload", &envelope.payload::<JsonValue>()?, &mut acc);
-
     match envelope.properties() {
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
             json_flatten("properties", &serde_json::to_value(reqp)?, &mut acc);
@@ -415,6 +422,14 @@ async fn handle_message(
             send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
+            let telemetry_topic = Subscription::multicast_requests_from(evp, Some(API_VERSION))
+                .subscription_topic(agent_id, API_VERSION)
+                .expect("Error building janus events subscription topic");
+
+            if topic == telemetry_topic {
+                json_flatten("payload", &envelope.payload::<JsonValue>()?, &mut acc);
+            }
+
             json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
             send(&client, payload, topmind).await
