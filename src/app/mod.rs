@@ -451,6 +451,8 @@ async fn send(
     let req = Request::post(&topmind.uri)
         .header("authorization", format!("Bearer {}", topmind.token))
         .header("content-type", "application/json")
+        // Must not be used with HTTP/2.
+        .header("connection", "keep-alive")
         .header("user-agent", "telemetry")
         .body(body)?;
 
