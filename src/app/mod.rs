@@ -1,4 +1,9 @@
-use async_std::{prelude::StreamExt, stream, sync::Mutex, task};
+use async_std::{
+    stream,
+    stream::StreamExt,
+    sync::{channel, Mutex},
+    task,
+};
 use std::{
     collections::HashMap,
     str::FromStr,
@@ -20,13 +25,14 @@ use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use svc_agent::mqtt::{
-    compat, AgentBuilder, ConnectionMode, Notification, QoS, ResponseStatus, SubscriptionTopic,
+    compat, AgentBuilder, ConnectionMode, QoS, ResponseStatus, SubscriptionTopic,
 };
 use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
 use svc_error::extension::sentry;
 
 pub(crate) const API_VERSION: &str = "v1";
+const INTERNAL_MESSAGE_QUEUE_SIZE: usize = 1_000_000;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -256,13 +262,13 @@ pub(crate) async fn run() -> Result<(), Error> {
         .map_err(|err| format_err!("Failed to create an agent: {}", err))?;
 
     // Message loop for incoming messages of MQTT Agent
-    let (mq_tx, mut mq_rx) = futures_channel::mpsc::unbounded::<Notification>();
-
+    let (mq_tx, mut mq_rx) = channel(INTERNAL_MESSAGE_QUEUE_SIZE);
     thread::spawn(move || {
         for message in rx {
-            if let Err(_) = mq_tx.unbounded_send(message) {
-                error!("Error sending message to the internal channel");
-            }
+            let mq_tx = mq_tx.clone();
+            task::spawn(async move {
+                mq_tx.send(message).await;
+            });
         }
     });
 
