@@ -24,3 +24,4 @@ clean_session = false
 uri = "https://endpoint"
 token = "secret"
 timeout = 5
+retry = 3

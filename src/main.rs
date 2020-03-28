@@ -1,12 +1,10 @@
-use std::io::{Error, ErrorKind};
+use anyhow::Result;
 
 #[async_std::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     env_logger::init();
 
-    app::run()
-        .await
-        .map_err(|err| Error::new(ErrorKind::Other, err))
+    app::run().await
 }
 
 mod app;
