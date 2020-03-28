@@ -33,6 +33,7 @@ use svc_error::extension::sentry;
 
 pub(crate) const API_VERSION: &str = "v1";
 const INTERNAL_MESSAGE_QUEUE_SIZE: usize = 1_000_000;
+const MAX_HTTP_CONNECTION: usize = 256;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -294,6 +295,7 @@ pub(crate) async fn run() -> Result<(), Error> {
     let client = Arc::new(
         HttpClient::builder()
             .version_negotiation(VersionNegotiation::http11())
+            .max_connections(MAX_HTTP_CONNECTION)
             .timeout(timeout)
             .build()?,
     );
