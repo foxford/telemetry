@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use async_std::{
     stream,
     stream::StreamExt,
@@ -16,9 +17,6 @@ use std::{
 };
 
 use chrono::Utc;
-use failure::{err_msg, format_err, Error};
-// use futures::future::{self, Either};
-// use futures_timer::Delay;
 use histogram::Histogram;
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
@@ -30,6 +28,9 @@ use svc_agent::mqtt::{
 use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
 use svc_error::extension::sentry;
+
+type Error = std::io::Error;
+type ErrorKind = std::io::ErrorKind;
 
 pub(crate) const API_VERSION: &str = "v1";
 const INTERNAL_MESSAGE_QUEUE_SIZE: usize = 1_000_000;
@@ -73,6 +74,14 @@ struct TopMindResponseError {
     #[serde(rename = "reasonPhrase")]
     reason_phrase: String,
 }
+
+impl std::fmt::Display for TopMindResponseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "reason = {}", &self.reason_phrase)
+    }
+}
+
+impl std::error::Error for TopMindResponseError {}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -155,36 +164,34 @@ impl UnicastMessagingPattern {
 }
 
 impl FromStr for MessagingPattern {
-    type Err = Error;
+    type Err = anyhow::Error;
 
     fn from_str(topic: &str) -> Result<Self, Self::Err> {
         if topic.starts_with("apps") {
             let arr = topic.splitn(5, '/').collect::<Vec<&str>>();
             match &arr[..] {
                 ["apps", from_account_id, "api", ref from_version, ref path] => {
-                    let from_account_id = from_account_id.parse().map_err(|err| {
-                        format_err!("error deserializing account_id from a string, {}", &err)
-                    })?;
+                    let from_account_id = from_account_id
+                        .parse()
+                        .context("Error to parse account_id")?;
                     let address = AccountAddress::new(from_account_id, from_version);
                     let pattern =
                         MessagingPattern::Broadcast(BroadcastMessagingPattern::new(address, path));
                     Ok(pattern)
                 }
-                _ => Err(format_err!(
-                    "invalid value for the messaging pattern: {:?}",
-                    topic
-                )),
+                _ => Err(Error::new(
+                    ErrorKind::Other,
+                    format!("invalid value for the messaging pattern: {:?}", topic),
+                )
+                .into()),
             }
         } else {
             let arr = topic.splitn(6, '/').collect::<Vec<&str>>();
             match &arr[..] {
                 ["agents", ref from_agent_id, "api", ref to_version, "out", ref to_account_id] => {
-                    let from_agent_id = from_agent_id.parse().map_err(|err| {
-                        format_err!("error deserializing account_id from a string, {}", &err)
-                    })?;
-                    let to_account_id = to_account_id.parse().map_err(|err| {
-                        format_err!("error deserializing account_id from a string, {}", &err)
-                    })?;
+                    let from_agent_id = from_agent_id.parse().context("Error to parse agent_id")?;
+                    let to_account_id =
+                        to_account_id.parse().context("Error to parse account_id")?;
                     let address = AccountAddress::new(to_account_id, to_version);
                     let pattern = MessagingPattern::Multicast(MulticastMessagingPattern::new(
                         from_agent_id,
@@ -193,12 +200,10 @@ impl FromStr for MessagingPattern {
                     Ok(pattern)
                 }
                 ["agents", ref to_agent_id, "api", ref to_version, "in", ref from_account_id] => {
-                    let from_account_id = from_account_id.parse().map_err(|err| {
-                        format_err!("error deserializing account_id from a string, {}", &err)
-                    })?;
-                    let to_agent_id = to_agent_id.parse().map_err(|err| {
-                        format_err!("error deserializing agent_id from a string, {}", &err)
-                    })?;
+                    let from_account_id = from_account_id
+                        .parse()
+                        .context("Error to parse account_id")?;
+                    let to_agent_id = to_agent_id.parse().context("Error to parse agent_id")?;
                     let address = AgentAddress::new(to_agent_id, to_version);
                     let pattern = MessagingPattern::Unicast(UnicastMessagingPattern::new(
                         from_account_id,
@@ -206,10 +211,11 @@ impl FromStr for MessagingPattern {
                     ));
                     Ok(pattern)
                 }
-                _ => Err(format_err!(
-                    "invalid value for the messaging pattern: {:?}",
-                    topic
-                )),
+                _ => Err(Error::new(
+                    ErrorKind::Other,
+                    format!("invalid value for the messaging pattern: {:?}", topic),
+                )
+                .into()),
             }
         }
     }
@@ -239,9 +245,9 @@ fn json_flatten(prefix: &str, json: &JsonValue, acc: &mut HashMap<String, JsonVa
 
 ////////////////////////////////////////////////////////////////////////////////
 
-pub(crate) async fn run() -> Result<(), Error> {
+pub(crate) async fn run() -> Result<()> {
     // Config
-    let config = config::load().map_err(|err| format_err!("Failed to load config: {}", err))?;
+    let config = config::load().context("Failed to load config")?;
     info!("App config: {:?}", config);
 
     // Agent
@@ -253,7 +259,7 @@ pub(crate) async fn run() -> Result<(), Error> {
         .subject(&agent_id)
         .key(config.id_token.algorithm, config.id_token.key.as_slice())
         .build()
-        .map_err(|err| format_err!("Error creating an id token: {}", err))?;
+        .context("Error creating an id token")?;
 
     let mut agent_config = config.mqtt.clone();
     agent_config.set_password(&token);
@@ -262,7 +268,7 @@ pub(crate) async fn run() -> Result<(), Error> {
     let (mut agent, rx) = AgentBuilder::new(agent_id.clone(), API_VERSION)
         .connection_mode(ConnectionMode::Observer)
         .start(&agent_config)
-        .map_err(|err| format_err!("Failed to create an agent: {}", err))?;
+        .context("Failed to create an agent")?;
 
     // Message loop for incoming messages of MQTT Agent
     let (mq_tx, mut mq_rx) = channel(INTERNAL_MESSAGE_QUEUE_SIZE);
@@ -415,35 +421,53 @@ async fn handle_message(
     topic: &str,
     payload: Arc<Vec<u8>>,
     topmind: Arc<TopMindConfig>,
-) -> Result<(), Error> {
+) -> Result<()> {
     let mut acc: HashMap<String, JsonValue> = HashMap::new();
 
-    let pattern = topic.parse::<MessagingPattern>()?;
-    json_flatten("pattern", &serde_json::to_value(pattern)?, &mut acc);
+    let pattern = topic
+        .parse::<MessagingPattern>()
+        .context("Failed to parse message pattern")?;
+    let json_pattern =
+        serde_json::to_value(pattern).context("Failed to serialize message pattern")?;
+    json_flatten("pattern", &json_pattern, &mut acc);
 
-    let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())?;
+    let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())
+        .context("Failed to parse message envelope")?;
     match envelope.properties() {
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
-            json_flatten("properties", &serde_json::to_value(reqp)?, &mut acc);
+            let json_properties =
+                serde_json::to_value(reqp).context("Failed to serialize message properties")?;
+            json_flatten("properties", &json_properties, &mut acc);
+
             let payload = serde_json::to_value(acc)?;
             try_send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Response(ref resp) => {
-            json_flatten("properties", &serde_json::to_value(resp)?, &mut acc);
+            let json_properties =
+                serde_json::to_value(resp).context("Failed to serialize message properties")?;
+            json_flatten("properties", &json_properties, &mut acc);
+
             let payload = serde_json::to_value(acc)?;
             try_send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
+            let json_properties =
+                serde_json::to_value(evp).context("Failed to serialize message properties")?;
+            json_flatten("properties", &json_properties, &mut acc);
+
+            // Flatten payload for telemetry events only.
             let telemetry_topic = Subscription::multicast_requests_from(evp, Some(API_VERSION))
                 .subscription_topic(agent_id, API_VERSION)
-                .expect("Error building janus events subscription topic");
-
+                .context("Error building telemetry subscription topic")?;
             if topic == telemetry_topic {
-                json_flatten("payload", &envelope.payload::<JsonValue>()?, &mut acc);
+                let json_payload = envelope
+                    .payload::<JsonValue>()
+                    .context("Failed to serialize message payload")?;
+                json_flatten("payload", &json_payload, &mut acc);
             }
 
-            json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
-            let payload = serde_json::to_value(acc)?;
+            let payload =
+                serde_json::to_value(acc).context("Failed to serialize message payload")?;
             try_send(&client, payload, topmind).await
         }
     }
@@ -453,7 +477,7 @@ async fn try_send(
     client: &HttpClient,
     payload: JsonValue,
     topmind: Arc<TopMindConfig>,
-) -> Result<(), Error> {
+) -> Result<()> {
     let retry = topmind.retry.unwrap_or(MAX_ATTEMPTS);
     let mut errors = vec![];
     for _ in 0..retry {
@@ -467,18 +491,13 @@ async fn try_send(
     }
 
     errors.dedup();
-    Err(err_msg(errors.join(", ")))
+    Err(Error::new(ErrorKind::Other, errors.join(", ")).into())
 }
 
-async fn send(
-    client: &HttpClient,
-    payload: JsonValue,
-    topmind: Arc<TopMindConfig>,
-) -> Result<(), Error> {
+async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfig>) -> Result<()> {
     use isahc::prelude::*;
 
-    let body = serde_json::to_string(&payload)
-        .map_err(|err| format_err!("failed to build TopMind request, {}", err))?;
+    let body = serde_json::to_string(&payload).context("Failed to build TopMind request")?;
     let req = Request::post(&topmind.uri)
         .header("authorization", format!("Bearer {}", topmind.token))
         .header("content-type", "application/json")
@@ -487,25 +506,25 @@ async fn send(
         .header("user-agent", "telemetry")
         .body(body)?;
 
-    match client.send_async(req).await {
-        Ok(mut resp) => match resp.text_async().await {
-            Ok(data) => match serde_json::from_str::<TopMindResponse>(&data) {
-                Ok(TopMindResponse::Success(_data)) => Ok(()),
-                Ok(TopMindResponse::Error(data)) => Err(format_err!(
-                    "TopMind responded with the error, reason = {}",
-                    &data.reason_phrase
-                )),
-                Err(_) => Err(format_err!(
-                    "invalid format of the TopMind response, received data = '{}'",
-                    data
-                )),
-            },
-            Err(_) => Err(err_msg(
-                "invalid format of the TopMind response, received data isn't even a string",
-            )),
-        },
-        Err(err) => Err(format_err!("error sending the TopMind request, {}", &err)),
+    let mut resp = client
+        .send_async(req)
+        .await
+        .context("Error sending the TopMind request")?;
+    let data = resp
+        .text_async()
+        .await
+        .context("Invalid format of the TopMind response, received data isn't even a string")?;
+    let object = serde_json::from_str::<TopMindResponse>(&data).with_context(|| {
+        format!(
+            "Invalid format of the TopMind response, received data = '{}'",
+            data
+        )
+    })?;
+    if let TopMindResponse::Error(data) = object {
+        return Err(anyhow::Error::from(data).context("TopMind responded with the error"));
     }
+
+    Ok(())
 }
 
 ////////////////////////////////////////////////////////////////////////////////
