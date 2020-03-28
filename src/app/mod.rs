@@ -34,6 +34,7 @@ use svc_error::extension::sentry;
 pub(crate) const API_VERSION: &str = "v1";
 const INTERNAL_MESSAGE_QUEUE_SIZE: usize = 1_000_000;
 const MAX_HTTP_CONNECTION: usize = 256;
+const MAX_ATTEMPTS: u8 = 3;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -50,6 +51,7 @@ pub(crate) struct TopMindConfig {
     uri: String,
     token: String,
     timeout: Option<u64>,
+    retry: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -424,12 +426,12 @@ async fn handle_message(
         compat::IncomingEnvelopeProperties::Request(ref reqp) => {
             json_flatten("properties", &serde_json::to_value(reqp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
-            send(&client, payload, topmind).await
+            try_send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Response(ref resp) => {
             json_flatten("properties", &serde_json::to_value(resp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
-            send(&client, payload, topmind).await
+            try_send(&client, payload, topmind).await
         }
         compat::IncomingEnvelopeProperties::Event(ref evp) => {
             let telemetry_topic = Subscription::multicast_requests_from(evp, Some(API_VERSION))
@@ -442,9 +444,30 @@ async fn handle_message(
 
             json_flatten("properties", &serde_json::to_value(evp)?, &mut acc);
             let payload = serde_json::to_value(acc)?;
-            send(&client, payload, topmind).await
+            try_send(&client, payload, topmind).await
         }
     }
+}
+
+async fn try_send(
+    client: &HttpClient,
+    payload: JsonValue,
+    topmind: Arc<TopMindConfig>,
+) -> Result<(), Error> {
+    let retry = topmind.retry.unwrap_or(MAX_ATTEMPTS);
+    let mut errors = vec![];
+    for _ in 0..retry {
+        let payload = payload.clone();
+        let topmind = topmind.clone();
+
+        match send(client, payload, topmind).await {
+            ok @ Ok(_) => return ok,
+            Err(err) => errors.push(err.to_string()),
+        }
+    }
+
+    errors.dedup();
+    Err(err_msg(errors.join(", ")))
 }
 
 async fn send(
