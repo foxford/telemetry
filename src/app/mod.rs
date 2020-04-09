@@ -243,6 +243,20 @@ fn json_flatten(prefix: &str, json: &JsonValue, acc: &mut HashMap<String, JsonVa
     }
 }
 
+fn json_flatten_one_level_deep(
+    prefix: &str,
+    json: &JsonValue,
+    acc: &mut HashMap<String, JsonValue>,
+) {
+    if let Some(object) = json.as_object() {
+        for (key, value) in object {
+            if !value.is_object() {
+                acc.insert(json_flatten_prefix(key, prefix), value.clone());
+            }
+        }
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 pub(crate) async fn run() -> Result<()> {
@@ -439,6 +453,11 @@ async fn handle_message(
                 serde_json::to_value(reqp).context("Failed to serialize message properties")?;
             json_flatten("properties", &json_properties, &mut acc);
 
+            let json_payload = envelope
+                .payload::<JsonValue>()
+                .context("Failed to serialize message payload")?;
+            json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+
             let payload = serde_json::to_value(acc)?;
             try_send(&client, payload, topmind).await
         }
@@ -446,6 +465,11 @@ async fn handle_message(
             let json_properties =
                 serde_json::to_value(resp).context("Failed to serialize message properties")?;
             json_flatten("properties", &json_properties, &mut acc);
+
+            let json_payload = envelope
+                .payload::<JsonValue>()
+                .context("Failed to serialize message payload")?;
+            json_flatten_one_level_deep("payload", &json_payload, &mut acc);
 
             let payload = serde_json::to_value(acc)?;
             try_send(&client, payload, topmind).await

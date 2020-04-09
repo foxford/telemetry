@@ -7,7 +7,7 @@ The microservice is collecting telemetry data.
 
 ## Getting started
 
-To send a message
+To send a telemetry message
 ```bash
 mosquitto_pub -V 5 \
     -i 'test-pub.john-doe.usr.example.net' \
@@ -17,6 +17,18 @@ mosquitto_pub -V 5 \
     -D publish user-property 'label' 'ping' \
     -D publish user-property 'local_timestamp' "$(date +%s000)" \
     -m '{"avg":60.0, "max":60.0, "min":60.0, "object":["apps","ulms-p2p","fps"]}'
+```
+
+To send a general purpose message
+```bash
+mosquitto_pub -V 5 \
+    -i 'test-pub.john-doe.usr.example.net' \
+    -t 'agents/test-pub.john-doe.usr.example.net/api/v1/out/telemetry.svc.example.org' \
+    -D connect user-property 'connection_version' 'v2' \
+    -D connect user-property 'connection_mode' 'default' \
+    -D publish user-property 'label' 'ping' \
+    -D publish user-property 'local_timestamp' "$(date +%s000)" \
+    -m '{"id": "123e4567-e89b-12d3-a456-426655440000", "label": "foobar", "data": {"foo": "bar"}}'
 ```
 
 
