@@ -487,12 +487,27 @@ async fn handle_message(
                 let json_payload = envelope
                     .payload::<JsonValue>()
                     .context("Failed to serialize message payload")?;
-                json_flatten("payload", &json_payload, &mut acc);
+
+                if let Some(json_payload_array) = json_payload.as_array() {
+                    for json_payload_object in json_payload_array {
+                        let topmind = topmind.clone();
+                        let mut acc2 = acc.clone();
+                        json_flatten("payload", &json_payload_object, &mut acc2);
+
+                        let payload = serde_json::to_value(acc2)
+                            .context("Failed to serialize message payload")?;
+                        try_send(&client, payload, topmind).await?
+                    }
+                } else {
+                    json_flatten("payload", &json_payload, &mut acc);
+
+                    let payload =
+                        serde_json::to_value(acc).context("Failed to serialize message payload")?;
+                    try_send(&client, payload, topmind).await?
+                }
             }
 
-            let payload =
-                serde_json::to_value(acc).context("Failed to serialize message payload")?;
-            try_send(&client, payload, topmind).await
+            Ok(())
         }
     }
 }
