@@ -456,6 +456,7 @@ async fn handle_message(
             let json_payload = envelope
                 .payload::<JsonValue>()
                 .context("Failed to serialize message payload")?;
+            // For any request: send only first level key/value pairs from the message payload.
             json_flatten_one_level_deep("payload", &json_payload, &mut acc);
 
             let payload = serde_json::to_value(acc)?;
@@ -469,6 +470,7 @@ async fn handle_message(
             let json_payload = envelope
                 .payload::<JsonValue>()
                 .context("Failed to serialize message payload")?;
+            // For any response: send only first level key/value pairs from the message payload.
             json_flatten_one_level_deep("payload", &json_payload, &mut acc);
 
             let payload = serde_json::to_value(acc)?;
@@ -479,16 +481,17 @@ async fn handle_message(
                 serde_json::to_value(evp).context("Failed to serialize message properties")?;
             json_flatten("properties", &json_properties, &mut acc);
 
-            // Flatten payload for telemetry events only.
+            let json_payload = envelope
+                .payload::<JsonValue>()
+                .context("Failed to serialize message payload")?;
+
             let telemetry_topic = Subscription::multicast_requests_from(evp, Some(API_VERSION))
                 .subscription_topic(agent_id, API_VERSION)
                 .context("Error building telemetry subscription topic")?;
+            // Telemetry only events: send entire payload.
             if topic == telemetry_topic {
-                let json_payload = envelope
-                    .payload::<JsonValue>()
-                    .context("Failed to serialize message payload")?;
-
                 if let Some(json_payload_array) = json_payload.as_array() {
+                    // Send multiple metrics.
                     for json_payload_object in json_payload_array {
                         let topmind = topmind.clone();
                         let mut acc2 = acc.clone();
@@ -499,12 +502,21 @@ async fn handle_message(
                         try_send(&client, payload, topmind).await?
                     }
                 } else {
+                    // Send a single metric.
                     json_flatten("payload", &json_payload, &mut acc);
 
                     let payload =
                         serde_json::to_value(acc).context("Failed to serialize message payload")?;
                     try_send(&client, payload, topmind).await?
                 }
+            }
+            // All the other events: send only first level key/value pairs from the message payload.
+            else {
+                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+
+                let payload =
+                    serde_json::to_value(acc).context("Failed to serialize message payload")?;
+                try_send(&client, payload, topmind).await?
             }
 
             Ok(())
