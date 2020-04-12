@@ -21,7 +21,7 @@ use histogram::Histogram;
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 use svc_agent::mqtt::{
     compat, AgentBuilder, ConnectionMode, QoS, ResponseStatus, SubscriptionTopic,
 };
@@ -257,6 +257,18 @@ fn json_flatten_one_level_deep(
     }
 }
 
+fn adjust_request_properties(acc: &mut HashMap<String, JsonValue>) {
+    acc.insert(String::from("properties.type"), json!("request"));
+}
+
+fn adjust_response_properties(acc: &mut HashMap<String, JsonValue>) {
+    acc.insert(String::from("properties.type"), json!("response"));
+}
+
+fn adjust_event_properties(acc: &mut HashMap<String, JsonValue>) {
+    acc.insert(String::from("properties.type"), json!("event"));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 pub(crate) async fn run() -> Result<()> {
@@ -452,6 +464,7 @@ async fn handle_message(
             let json_properties =
                 serde_json::to_value(reqp).context("Failed to serialize message properties")?;
             json_flatten("properties", &json_properties, &mut acc);
+            adjust_request_properties(&mut acc);
 
             let json_payload = envelope
                 .payload::<JsonValue>()
@@ -466,6 +479,7 @@ async fn handle_message(
             let json_properties =
                 serde_json::to_value(resp).context("Failed to serialize message properties")?;
             json_flatten("properties", &json_properties, &mut acc);
+            adjust_response_properties(&mut acc);
 
             let json_payload = envelope
                 .payload::<JsonValue>()
@@ -480,6 +494,7 @@ async fn handle_message(
             let json_properties =
                 serde_json::to_value(evp).context("Failed to serialize message properties")?;
             json_flatten("properties", &json_properties, &mut acc);
+            adjust_event_properties(&mut acc);
 
             let json_payload = envelope
                 .payload::<JsonValue>()
