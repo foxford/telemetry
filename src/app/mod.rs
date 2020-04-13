@@ -276,6 +276,18 @@ fn adjust_properties(acc: &mut HashMap<String, JsonValue>) {
     adjust_agent_id("properties.agent_id", acc);
     adjust_agent_id("properties.broker_agent_id", acc);
     adjust_tracking_id("properties.tracking_id", acc);
+    replace_session_tracking_label("properties.session_tracking_label", acc);
+    replace_integer("properties.status", acc);
+    replace_integer("properties.broker_initial_processing_timestamp", acc);
+    replace_integer("properties.broker_processing_timestamp", acc);
+    replace_integer("properties.broker_timestamp", acc);
+    replace_integer("properties.local_initial_timediff", acc);
+    replace_integer("properties.initial_timestamp", acc);
+    replace_integer("properties.timestamp", acc);
+    replace_integer("properties.authorization_time", acc);
+    replace_integer("properties.processing_time", acc);
+    replace_integer("properties.cumulative_authorization_time", acc);
+    replace_integer("properties.cumulative_processing_time", acc);
 }
 
 fn adjust_pattern(pattern: &MessagingPattern, acc: &mut HashMap<String, JsonValue>) {
@@ -297,16 +309,13 @@ fn adjust_pattern(pattern: &MessagingPattern, acc: &mut HashMap<String, JsonValu
 fn adjust_agent_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
     if let Some(JsonValue::String(val)) = acc.get(key) {
         let arr = val.splitn(2, '.').collect::<Vec<&str>>();
-        match &arr[..] {
-            [ref label, ref account_id] => {
-                let label = json!(label);
-                let account_id = json!(account_id);
-                let next = json_flatten_prefix("account_id", key);
-                acc.insert(json_flatten_prefix("label", key), label);
-                acc.insert(next.clone(), account_id);
-                adjust_account_id(&next, acc);
-            }
-            _ => (),
+        if let [ref label, ref account_id] = &arr[..] {
+            let label = json!(label);
+            let account_id = json!(account_id);
+            let next = json_flatten_prefix("account_id", key);
+            acc.insert(json_flatten_prefix("label", key), label);
+            acc.insert(next.clone(), account_id);
+            adjust_account_id(&next, acc);
         }
     }
 }
@@ -314,14 +323,11 @@ fn adjust_agent_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
 fn adjust_account_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
     if let Some(JsonValue::String(val)) = acc.get(key) {
         let arr = val.splitn(2, '.').collect::<Vec<&str>>();
-        match &arr[..] {
-            [ref label, ref audience] => {
-                let label = json!(label);
-                let audience = json!(audience);
-                acc.insert(json_flatten_prefix("label", key), label);
-                acc.insert(json_flatten_prefix("audience", key), audience);
-            }
-            _ => (),
+        if let [ref label, ref audience] = &arr[..] {
+            let label = json!(label);
+            let audience = json!(audience);
+            acc.insert(json_flatten_prefix("label", key), label);
+            acc.insert(json_flatten_prefix("audience", key), audience);
         }
     }
 }
@@ -329,16 +335,13 @@ fn adjust_account_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
 fn adjust_tracking_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
     if let Some(JsonValue::String(val)) = acc.get(key) {
         let arr = val.splitn(2, '.').collect::<Vec<&str>>();
-        match &arr[..] {
-            [ref label, ref session_id] => {
-                let label = json!(label);
-                let session_id = json!(session_id);
-                let next = json_flatten_prefix("session_id", key);
-                acc.insert(json_flatten_prefix("label", key), label);
-                acc.insert(next.clone(), session_id);
-                adjust_session_id(&next, acc);
-            }
-            _ => (),
+        if let [ref label, ref session_id] = &arr[..] {
+            let label = json!(label);
+            let session_id = json!(session_id);
+            let next = json_flatten_prefix("session_id", key);
+            acc.insert(json_flatten_prefix("label", key), label);
+            acc.insert(next.clone(), session_id);
+            adjust_session_id(&next, acc);
         }
     }
 }
@@ -346,20 +349,34 @@ fn adjust_tracking_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
 fn adjust_session_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
     if let Some(JsonValue::String(val)) = acc.get(key) {
         let arr = val.splitn(2, '.').collect::<Vec<&str>>();
-        match &arr[..] {
-            [ref agent_session_label, ref broker_session_label] => {
-                let agent_session_label = json!(agent_session_label);
-                let broker_session_label = json!(broker_session_label);
-                acc.insert(
-                    json_flatten_prefix("agent_session_label", key),
-                    agent_session_label,
-                );
-                acc.insert(
-                    json_flatten_prefix("broker_session_label", key),
-                    broker_session_label,
-                );
-            }
-            _ => (),
+        if let [ref agent_session_label, ref broker_session_label] = &arr[..] {
+            let agent_session_label = json!(agent_session_label);
+            let broker_session_label = json!(broker_session_label);
+            acc.insert(
+                json_flatten_prefix("agent_session_label", key),
+                agent_session_label,
+            );
+            acc.insert(
+                json_flatten_prefix("broker_session_label", key),
+                broker_session_label,
+            );
+        }
+    }
+}
+
+fn replace_session_tracking_label(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(val)) = acc.get(key) {
+        let arr = val.split(' ').collect::<Vec<&str>>();
+        let arr = json!(arr);
+        acc.insert(key.to_owned(), arr);
+    }
+}
+
+fn replace_integer(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(val)) = acc.get(key) {
+        if let Ok(integer) = val.parse::<i64>() {
+            let integer = json!(integer);
+            acc.insert(key.to_owned(), integer);
         }
     }
 }
