@@ -85,7 +85,7 @@ impl std::error::Error for TopMindResponseError {}
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct AccountAddress {
     account_id: AccountId,
     version: String,
@@ -100,7 +100,7 @@ impl AccountAddress {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct AgentAddress {
     agent_id: AgentId,
     version: String,
@@ -115,7 +115,7 @@ impl AgentAddress {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[serde(tag = "type")]
 enum MessagingPattern {
@@ -124,7 +124,7 @@ enum MessagingPattern {
     Unicast(UnicastMessagingPattern),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct BroadcastMessagingPattern {
     from: AccountAddress,
     path: String,
@@ -139,7 +139,7 @@ impl BroadcastMessagingPattern {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct MulticastMessagingPattern {
     from: AgentId,
     to: AccountAddress,
@@ -151,7 +151,7 @@ impl MulticastMessagingPattern {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct UnicastMessagingPattern {
     from: AccountId,
     to: AgentAddress,
@@ -259,14 +259,109 @@ fn json_flatten_one_level_deep(
 
 fn adjust_request_properties(acc: &mut HashMap<String, JsonValue>) {
     acc.insert(String::from("properties.type"), json!("request"));
+    adjust_properties(acc);
 }
 
 fn adjust_response_properties(acc: &mut HashMap<String, JsonValue>) {
     acc.insert(String::from("properties.type"), json!("response"));
+    adjust_properties(acc);
 }
 
 fn adjust_event_properties(acc: &mut HashMap<String, JsonValue>) {
     acc.insert(String::from("properties.type"), json!("event"));
+    adjust_properties(acc);
+}
+
+fn adjust_properties(acc: &mut HashMap<String, JsonValue>) {
+    adjust_agent_id("properties.agent_id", acc);
+    adjust_agent_id("properties.broker_agent_id", acc);
+    adjust_tracking_id("properties.tracking_id", acc);
+}
+
+fn adjust_pattern(pattern: &MessagingPattern, acc: &mut HashMap<String, JsonValue>) {
+    match pattern {
+        MessagingPattern::Broadcast(_) => {
+            adjust_account_id("pattern.from.account_id", acc);
+        }
+        MessagingPattern::Multicast(_) => {
+            adjust_agent_id("pattern.from", acc);
+            adjust_account_id("pattern.to.account_id", acc);
+        }
+        MessagingPattern::Unicast(_) => {
+            adjust_account_id("pattern.from", acc);
+            adjust_agent_id("pattern.to.agent_id", acc);
+        }
+    }
+}
+
+fn adjust_agent_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(val)) = acc.get(key) {
+        let arr = val.splitn(2, '.').collect::<Vec<&str>>();
+        match &arr[..] {
+            [ref label, ref account_id] => {
+                let label = json!(label);
+                let account_id = json!(account_id);
+                let next = json_flatten_prefix("account_id", key);
+                acc.insert(json_flatten_prefix("label", key), label);
+                acc.insert(next.clone(), account_id);
+                adjust_account_id(&next, acc);
+            }
+            _ => (),
+        }
+    }
+}
+
+fn adjust_account_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(val)) = acc.get(key) {
+        let arr = val.splitn(2, '.').collect::<Vec<&str>>();
+        match &arr[..] {
+            [ref label, ref audience] => {
+                let label = json!(label);
+                let audience = json!(audience);
+                acc.insert(json_flatten_prefix("label", key), label);
+                acc.insert(json_flatten_prefix("audience", key), audience);
+            }
+            _ => (),
+        }
+    }
+}
+
+fn adjust_tracking_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(val)) = acc.get(key) {
+        let arr = val.splitn(2, '.').collect::<Vec<&str>>();
+        match &arr[..] {
+            [ref label, ref session_id] => {
+                let label = json!(label);
+                let session_id = json!(session_id);
+                let next = json_flatten_prefix("session_id", key);
+                acc.insert(json_flatten_prefix("label", key), label);
+                acc.insert(next.clone(), session_id);
+                adjust_session_id(&next, acc);
+            }
+            _ => (),
+        }
+    }
+}
+
+fn adjust_session_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(val)) = acc.get(key) {
+        let arr = val.splitn(2, '.').collect::<Vec<&str>>();
+        match &arr[..] {
+            [ref agent_session_label, ref broker_session_label] => {
+                let agent_session_label = json!(agent_session_label);
+                let broker_session_label = json!(broker_session_label);
+                acc.insert(
+                    json_flatten_prefix("agent_session_label", key),
+                    agent_session_label,
+                );
+                acc.insert(
+                    json_flatten_prefix("broker_session_label", key),
+                    broker_session_label,
+                );
+            }
+            _ => (),
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -454,8 +549,9 @@ async fn handle_message(
         .parse::<MessagingPattern>()
         .context("Failed to parse message pattern")?;
     let json_pattern =
-        serde_json::to_value(pattern).context("Failed to serialize message pattern")?;
+        serde_json::to_value(pattern.clone()).context("Failed to serialize message pattern")?;
     json_flatten("pattern", &json_pattern, &mut acc);
+    adjust_pattern(&pattern, &mut acc);
 
     let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())
         .context("Failed to parse message envelope")?;
