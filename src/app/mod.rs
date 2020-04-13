@@ -250,7 +250,7 @@ fn json_flatten_one_level_deep(
 ) {
     if let Some(object) = json.as_object() {
         for (key, value) in object {
-            if !value.is_object() {
+            if value.is_string() || value.is_number() || value.is_boolean() {
                 acc.insert(json_flatten_prefix(key, prefix), value.clone());
             }
         }

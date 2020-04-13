@@ -32,12 +32,12 @@ To send a general purpose message
 ```bash
 mosquitto_pub -V 5 \
     -i 'test-pub.john-doe.usr.example.net' \
-    -t 'agents/test-pub.john-doe.usr.example.net/api/v1/out/telemetry.svc.example.org' \
+    -t 'agents/test-pub.john-doe.usr.example.net/api/v1/out/app.svc.example.org' \
     -D connect user-property 'connection_version' 'v2' \
     -D connect user-property 'connection_mode' 'default' \
     -D publish user-property 'label' 'ping' \
     -D publish user-property 'local_timestamp' "$(date +%s000)" \
-    -m '{"id": "123e4567-e89b-12d3-a456-426655440000", "label": "foobar", "data": {"foo": "bar"}}'
+    -m '{"id": "123e4567-e89b-12d3-a456-426655440000", "object": {"foo": "bar"}, "list": [1, 2, 3], "boolean": true, "float": 0.12, "int": 12, "null": null}'
 ```
 
 
