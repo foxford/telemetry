@@ -250,7 +250,11 @@ fn json_flatten_one_level_deep(
 ) {
     if let Some(object) = json.as_object() {
         for (key, value) in object {
-            if value.is_string() || value.is_number() || value.is_boolean() {
+            if value.is_string()
+                || value.is_number()
+                || value.is_boolean()
+                || (value.is_object() && key == "tags")
+            {
                 acc.insert(json_flatten_prefix(key, prefix), value.clone());
             }
         }
@@ -304,6 +308,11 @@ fn adjust_pattern(pattern: &MessagingPattern, acc: &mut HashMap<String, JsonValu
             adjust_agent_id("pattern.to.agent_id", acc);
         }
     }
+}
+
+fn adjust_payload(acc: &mut HashMap<String, JsonValue>) {
+    adjust_agent_id("payload.agent_id", acc);
+    adjust_agent_id("payload.created_by", acc);
 }
 
 fn adjust_agent_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
@@ -584,6 +593,7 @@ async fn handle_message(
                 .context("Failed to serialize message payload")?;
             // For any request: send only first level key/value pairs from the message payload.
             json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+            adjust_payload(&mut acc);
 
             let payload = serde_json::to_value(acc)?;
             try_send(&client, payload, topmind).await
@@ -599,6 +609,7 @@ async fn handle_message(
                 .context("Failed to serialize message payload")?;
             // For any response: send only first level key/value pairs from the message payload.
             json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+            adjust_payload(&mut acc);
 
             let payload = serde_json::to_value(acc)?;
             try_send(&client, payload, topmind).await
@@ -624,6 +635,7 @@ async fn handle_message(
                         let topmind = topmind.clone();
                         let mut acc2 = acc.clone();
                         json_flatten("payload", &json_payload_object, &mut acc2);
+                        adjust_payload(&mut acc);
 
                         let payload = serde_json::to_value(acc2)
                             .context("Failed to serialize message payload")?;
@@ -632,6 +644,7 @@ async fn handle_message(
                 } else {
                     // Send a single metric.
                     json_flatten("payload", &json_payload, &mut acc);
+                    adjust_payload(&mut acc);
 
                     let payload =
                         serde_json::to_value(acc).context("Failed to serialize message payload")?;
@@ -641,6 +654,7 @@ async fn handle_message(
             // All the other events: send only first level key/value pairs from the message payload.
             else {
                 json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                adjust_payload(&mut acc);
 
                 let payload =
                     serde_json::to_value(acc).context("Failed to serialize message payload")?;

@@ -37,7 +37,7 @@ mosquitto_pub -V 5 \
     -D connect user-property 'connection_mode' 'default' \
     -D publish user-property 'label' 'ping' \
     -D publish user-property 'local_timestamp' "$(date +%s000)" \
-    -m '{"id": "123e4567-e89b-12d3-a456-426655440000", "object": {"foo": "bar"}, "list": [1, 2, 3], "boolean": true, "float": 0.12, "int": 12, "null": null}'
+    -m '{"id": "123e4567-e89b-12d3-a456-426655440000", "object": {"foo": "bar"}, "tags": {"bar": "foo"}, "list": [1, 2, 3], "boolean": true, "float": 0.12, "int": 12, "null": null}'
 ```
 
 
