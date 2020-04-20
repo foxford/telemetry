@@ -1,10 +1,5 @@
 use anyhow::{Context, Result};
-use async_std::{
-    stream,
-    stream::StreamExt,
-    sync::{channel, Mutex},
-    task,
-};
+use async_std::{stream, stream::StreamExt, sync::channel, task};
 use std::{
     collections::HashMap,
     str::FromStr,
@@ -16,8 +11,6 @@ use std::{
     time::Duration,
 };
 
-use chrono::Utc;
-use histogram::Histogram;
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
@@ -458,18 +451,14 @@ pub(crate) async fn run() -> Result<()> {
     // Throughput counters
     let incoming_throughput = Arc::new(AtomicUsize::new(0));
     let outgoing_throughput = Arc::new(AtomicUsize::new(0));
-    let latency = Arc::new(Mutex::new(Histogram::new()));
     task::spawn(reset(
         incoming_throughput.clone(),
         outgoing_throughput.clone(),
-        latency.clone(),
     ));
 
     while let Some(message) = mq_rx.next().await {
-        let start_time = Utc::now();
         incoming_throughput.fetch_add(1, Ordering::SeqCst);
         let outgoing_throughput = outgoing_throughput.clone();
-        let latency = latency.clone();
         let client = client.clone();
         let agent_id = agent_id.clone();
 
@@ -510,9 +499,6 @@ pub(crate) async fn run() -> Result<()> {
                             .unwrap_or_else(|err| warn!("Error sending error to Sentry: {}", err));
                     } else {
                         outgoing_throughput.fetch_add(1, Ordering::SeqCst);
-
-                        let processing_time = (Utc::now() - start_time).num_milliseconds() as u64;
-                        let _ = (*latency.lock().await).increment(processing_time);
                     }
 
                     // Log incoming messages
@@ -532,30 +518,16 @@ pub(crate) async fn run() -> Result<()> {
 async fn reset(
     incoming: Arc<AtomicUsize>,
     outgoing: Arc<AtomicUsize>,
-    latency: Arc<Mutex<Histogram>>,
 ) -> Result<(), std::io::Error> {
     let mut interval = stream::interval(Duration::from_secs(1));
     while let Some(_) = interval.next().await {
         let now = chrono::offset::Utc::now();
-        let (p90, p95, p99) = {
-            let mut lock = latency.lock().await;
-            let result = (
-                (*lock).percentile(0.90).unwrap_or(0),
-                (*lock).percentile(0.90).unwrap_or(0),
-                (*lock).percentile(0.90).unwrap_or(0),
-            );
-            (*lock).clear();
-            result
-        };
 
         println!(
-            "{} | throughput: {} => {} | latency: p90={}, p95={}, p99={}",
+            "{} | throughput: {} => {}",
             now,
             incoming.swap(0, Ordering::SeqCst),
-            outgoing.swap(0, Ordering::SeqCst),
-            p90,
-            p95,
-            p99,
+            outgoing.swap(0, Ordering::SeqCst)
         );
     }
 
