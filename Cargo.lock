@@ -1842,6 +1842,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "svc-agent"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589535f2eaa8aea7a4ea2459cce876b1e0ec4453111e08e70a564aac5fc41620"
+dependencies = [
+ "base64 0.10.1",
+ "chrono",
+ "futures 0.3.4",
+ "futures-channel",
+ "http 0.1.21",
+ "rumqtt",
+ "serde 1.0.106",
+ "serde_derive",
+ "serde_json",
+ "svc-authn",
+ "uuid 0.8.1",
+]
+
+[[package]]
 name = "svc-authn"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1866,7 +1885,7 @@ dependencies = [
  "sentry",
  "serde 1.0.106",
  "serde_derive",
- "svc-agent",
+ "svc-agent 0.11.4",
  "svc-authn",
 ]
 
@@ -1918,7 +1937,7 @@ dependencies = [
  "serde 1.0.106",
  "serde_derive",
  "serde_json",
- "svc-agent",
+ "svc-agent 0.12.0",
  "svc-authn",
  "svc-error",
 ]
