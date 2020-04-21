@@ -16,7 +16,7 @@ use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use svc_agent::mqtt::{
-    compat, AgentBuilder, ConnectionMode, QoS, ResponseStatus, SubscriptionTopic,
+    compat, Agent, AgentBuilder, ConnectionMode, QoS, ResponseStatus, SubscriptionTopic,
 };
 use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
@@ -383,6 +383,19 @@ fn replace_integer(key: &str, acc: &mut HashMap<String, JsonValue>) {
     }
 }
 
+fn subscribe(agent: &mut Agent) {
+    let group = SharedGroup::new("loadbalancer", agent.id().as_account_id().clone());
+    agent
+        .subscribe(&"apps/+/api/+/#", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to broadcast events");
+    agent
+        .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to multicast requests and events");
+    agent
+        .subscribe(&"agents/+/api/+/in/+", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to unicast requests and responses");
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 pub(crate) async fn run() -> Result<()> {
@@ -404,7 +417,6 @@ pub(crate) async fn run() -> Result<()> {
     let mut agent_config = config.mqtt.clone();
     agent_config.set_password(&token);
 
-    let group = SharedGroup::new("loadbalancer", agent_id.as_account_id().clone());
     let (mut agent, rx) = AgentBuilder::new(agent_id.clone(), API_VERSION)
         .connection_mode(ConnectionMode::Observer)
         .start(&agent_config)
@@ -427,15 +439,7 @@ pub(crate) async fn run() -> Result<()> {
     }
 
     // Subscription
-    agent
-        .subscribe(&"apps/+/api/+/#", QoS::AtMostOnce, Some(&group))
-        .expect("Error subscribing to broadcast events");
-    agent
-        .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
-        .expect("Error subscribing to multicast requests and events");
-    agent
-        .subscribe(&"agents/+/api/+/in/+", QoS::AtMostOnce, Some(&group))
-        .expect("Error subscribing to unicast requests and responses");
+    subscribe(&mut agent);
 
     // Http client
     let topmind = Arc::new(config.topmind);
@@ -460,11 +464,15 @@ pub(crate) async fn run() -> Result<()> {
         incoming_throughput.fetch_add(1, Ordering::SeqCst);
         let outgoing_throughput = outgoing_throughput.clone();
         let client = client.clone();
+        let mut agent = agent.clone();
         let agent_id = agent_id.clone();
 
         let topmind = topmind.clone();
         task::spawn(async move {
             match message {
+                svc_agent::mqtt::Notification::Reconnection => {
+                    subscribe(&mut agent);
+                }
                 svc_agent::mqtt::Notification::Publish(message) => {
                     let topic: &str = &message.topic_name;
 
