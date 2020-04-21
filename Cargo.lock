@@ -105,9 +105,9 @@ dependencies = [
 
 [[package]]
 name = "backtrace-sys"
-version = "0.1.35"
+version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7de8aba10a69c8e8d7622c5710229485ec32e9d55fdad160ea559c086fdcd118"
+checksum = "78848718ee1255a2485d1309ad9cdecfc2e7d0362dd11c6829364c6b35ae1bc7"
 dependencies = [
  "cc",
  "libc",
@@ -1824,25 +1824,6 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "svc-agent"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd3782b29fadee8c872e95849279bc26ef34c80cc2016d9628528d80fc7810a4"
-dependencies = [
- "base64 0.10.1",
- "chrono",
- "futures 0.3.4",
- "futures-channel",
- "http 0.1.21",
- "rumqtt",
- "serde 1.0.106",
- "serde_derive",
- "serde_json",
- "svc-authn",
- "uuid 0.8.1",
-]
-
-[[package]]
-name = "svc-agent"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589535f2eaa8aea7a4ea2459cce876b1e0ec4453111e08e70a564aac5fc41620"
@@ -1885,7 +1866,7 @@ dependencies = [
  "sentry",
  "serde 1.0.106",
  "serde_derive",
- "svc-agent 0.11.4",
+ "svc-agent",
  "svc-authn",
 ]
 
@@ -1937,7 +1918,7 @@ dependencies = [
  "serde 1.0.106",
  "serde_derive",
  "serde_json",
- "svc-agent 0.12.0",
+ "svc-agent",
  "svc-authn",
  "svc-error",
 ]
@@ -2437,9 +2418,9 @@ checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 
 [[package]]
 name = "winapi-util"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa515c5163a99cc82bab70fd3bfdd36d827be85de63737b40fcef2ce084a436e"
+checksum = "70ec6ce85bb158151cae5e5c87f95a8e97d2c0c4b001223f33a334e3ce5de178"
 dependencies = [
  "winapi 0.3.8",
 ]
