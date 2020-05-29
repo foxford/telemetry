@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{format_err, Context, Result};
 use async_std::{stream, stream::StreamExt, sync::channel, task};
 use std::{
     collections::HashMap,
@@ -15,8 +15,10 @@ use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use svc_agent::mqtt::AgentNotification;
 use svc_agent::mqtt::{
-    compat, Agent, AgentBuilder, ConnectionMode, QoS, ResponseStatus, SubscriptionTopic,
+    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, IncomingRequest,
+    IncomingResponse, QoS, ResponseStatus, SubscriptionTopic,
 };
 use svc_agent::{AccountId, AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::{jose::Algorithm, token::jws_compact};
@@ -470,25 +472,19 @@ pub(crate) async fn run() -> Result<()> {
         let topmind = topmind.clone();
         task::spawn(async move {
             match message {
-                svc_agent::mqtt::Notification::Reconnection => {
+                AgentNotification::Reconnection => {
                     subscribe(&mut agent);
                 }
-                svc_agent::mqtt::Notification::Publish(message) => {
-                    let topic: &str = &message.topic_name;
+                AgentNotification::Message(message, metadata) => {
+                    let topic: &str = &metadata.topic;
 
-                    let result = handle_message(
-                        &client,
-                        &agent_id,
-                        topic,
-                        message.payload.clone(),
-                        topmind.clone(),
-                    )
-                    .await;
+                    let result =
+                        handle_message(&client, &agent_id, topic, &message, topmind.clone()).await;
 
                     if let Err(err) = result {
                         error!(
-                            "Error processing a message = '{text}' sent to the topic = '{topic}', {detail}",
-                            text = String::from_utf8_lossy(message.payload.as_slice()),
+                            "Error processing a message = '{text:?}' sent to the topic = '{topic}', {detail}",
+                            text = message,
                             topic = topic,
                             detail = err,
                         );
@@ -508,12 +504,6 @@ pub(crate) async fn run() -> Result<()> {
                     } else {
                         outgoing_throughput.fetch_add(1, Ordering::SeqCst);
                     }
-
-                    // Log incoming messages
-                    info!(
-                        "Incoming message = '{}' sent to the topic = '{}', dup = '{}', pkid = '{:?}'",
-                        String::from_utf8_lossy(message.payload.as_slice()), topic, message.dup, message.pkid,
-                    );
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
@@ -546,7 +536,7 @@ async fn handle_message(
     client: &HttpClient,
     agent_id: &AgentId,
     topic: &str,
-    payload: Arc<Vec<u8>>,
+    message: &Result<IncomingMessage<String>, String>,
     topmind: Arc<TopMindConfig>,
 ) -> Result<()> {
     let mut acc: HashMap<String, JsonValue> = HashMap::new();
@@ -559,90 +549,89 @@ async fn handle_message(
     json_flatten("pattern", &json_pattern, &mut acc);
     adjust_pattern(&pattern, &mut acc);
 
-    let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(payload.as_slice())
-        .context("Failed to parse message envelope")?;
-    match envelope.properties() {
-        compat::IncomingEnvelopeProperties::Request(ref reqp) => {
-            let json_properties =
-                serde_json::to_value(reqp).context("Failed to serialize message properties")?;
-            json_flatten("properties", &json_properties, &mut acc);
-            adjust_request_properties(&mut acc);
+    match message {
+        Ok(ref message) => match message {
+            IncomingMessage::Request(ref req) => {
+                let json_properties = serde_json::to_value(req.properties())
+                    .context("Failed to serialize message properties")?;
+                json_flatten("properties", &json_properties, &mut acc);
+                adjust_request_properties(&mut acc);
 
-            let json_payload = envelope
-                .payload::<JsonValue>()
-                .context("Failed to serialize message payload")?;
-            // For any request: send only first level key/value pairs from the message payload.
-            json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-            adjust_payload(&mut acc);
+                let json_payload = IncomingRequest::convert_payload::<JsonValue>(req)
+                    .context("Failed to serialize message payload")?;
+                // For any request: send only first level key/value pairs from the message payload.
+                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                adjust_payload(&mut acc);
 
-            let payload = serde_json::to_value(acc)?;
-            try_send(&client, payload, topmind).await
-        }
-        compat::IncomingEnvelopeProperties::Response(ref resp) => {
-            let json_properties =
-                serde_json::to_value(resp).context("Failed to serialize message properties")?;
-            json_flatten("properties", &json_properties, &mut acc);
-            adjust_response_properties(&mut acc);
+                let payload = serde_json::to_value(acc)?;
+                try_send(&client, payload, topmind).await
+            }
+            IncomingMessage::Response(ref resp) => {
+                let json_properties = serde_json::to_value(resp.properties())
+                    .context("Failed to serialize message properties")?;
+                json_flatten("properties", &json_properties, &mut acc);
+                adjust_response_properties(&mut acc);
 
-            let json_payload = envelope
-                .payload::<JsonValue>()
-                .context("Failed to serialize message payload")?;
-            // For any response: send only first level key/value pairs from the message payload.
-            json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-            adjust_payload(&mut acc);
+                let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
+                    .context("Failed to serialize message payload")?;
+                // For any response: send only first level key/value pairs from the message payload.
+                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                adjust_payload(&mut acc);
 
-            let payload = serde_json::to_value(acc)?;
-            try_send(&client, payload, topmind).await
-        }
-        compat::IncomingEnvelopeProperties::Event(ref evp) => {
-            let json_properties =
-                serde_json::to_value(evp).context("Failed to serialize message properties")?;
-            json_flatten("properties", &json_properties, &mut acc);
-            adjust_event_properties(&mut acc);
+                let payload = serde_json::to_value(acc)?;
+                try_send(&client, payload, topmind).await
+            }
+            IncomingMessage::Event(ref event) => {
+                let json_properties = serde_json::to_value(event.properties())
+                    .context("Failed to serialize message properties")?;
+                json_flatten("properties", &json_properties, &mut acc);
+                adjust_event_properties(&mut acc);
 
-            let json_payload = envelope
-                .payload::<JsonValue>()
-                .context("Failed to serialize message payload")?;
+                let json_payload = IncomingEvent::convert_payload::<JsonValue>(event)
+                    .context("Failed to serialize message payload")?;
 
-            let telemetry_topic = Subscription::multicast_requests_from(evp, Some(API_VERSION))
-                .subscription_topic(agent_id, API_VERSION)
-                .context("Error building telemetry subscription topic")?;
-            // Telemetry only events: send entire payload.
-            if topic == telemetry_topic {
-                if let Some(json_payload_array) = json_payload.as_array() {
-                    // Send multiple metrics.
-                    for json_payload_object in json_payload_array {
-                        let topmind = topmind.clone();
-                        let mut acc2 = acc.clone();
-                        json_flatten("payload", &json_payload_object, &mut acc2);
+                let telemetry_topic =
+                    Subscription::multicast_requests_from(event.properties(), Some(API_VERSION))
+                        .subscription_topic(agent_id, API_VERSION)
+                        .context("Error building telemetry subscription topic")?;
+                // Telemetry only events: send entire payload.
+                if topic == telemetry_topic {
+                    if let Some(json_payload_array) = json_payload.as_array() {
+                        // Send multiple metrics.
+                        for json_payload_object in json_payload_array {
+                            let topmind = topmind.clone();
+                            let mut acc2 = acc.clone();
+                            json_flatten("payload", &json_payload_object, &mut acc2);
+                            adjust_payload(&mut acc);
+
+                            let payload = serde_json::to_value(acc2)
+                                .context("Failed to serialize message payload")?;
+                            try_send(&client, payload, topmind).await?
+                        }
+                    } else {
+                        // Send a single metric.
+                        json_flatten("payload", &json_payload, &mut acc);
                         adjust_payload(&mut acc);
 
-                        let payload = serde_json::to_value(acc2)
+                        let payload = serde_json::to_value(acc)
                             .context("Failed to serialize message payload")?;
                         try_send(&client, payload, topmind).await?
                     }
-                } else {
-                    // Send a single metric.
-                    json_flatten("payload", &json_payload, &mut acc);
+                }
+                // All the other events: send only first level key/value pairs from the message payload.
+                else {
+                    json_flatten_one_level_deep("payload", &json_payload, &mut acc);
                     adjust_payload(&mut acc);
 
                     let payload =
                         serde_json::to_value(acc).context("Failed to serialize message payload")?;
                     try_send(&client, payload, topmind).await?
                 }
-            }
-            // All the other events: send only first level key/value pairs from the message payload.
-            else {
-                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-                adjust_payload(&mut acc);
 
-                let payload =
-                    serde_json::to_value(acc).context("Failed to serialize message payload")?;
-                try_send(&client, payload, topmind).await?
+                Ok(())
             }
-
-            Ok(())
-        }
+        },
+        Err(e) => Err(format_err!(e.to_owned()).context("Failed to parse message envelope")),
     }
 }
 
