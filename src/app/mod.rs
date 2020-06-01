@@ -308,6 +308,18 @@ fn adjust_pattern(pattern: &MessagingPattern, acc: &mut HashMap<String, JsonValu
 fn adjust_payload(acc: &mut HashMap<String, JsonValue>) {
     adjust_agent_id("payload.agent_id", acc);
     adjust_agent_id("payload.created_by", acc);
+    adjust_useragent_tag("payload.tags.user_agent", acc);
+}
+
+fn adjust_useragent_tag(key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(JsonValue::String(ua_str)) = acc.get(key) {
+        if let Ok(mut ua_json) = convert_ua_to_json(&ua_str) {
+            ua_json.drain().for_each(|(ua_key, ua_val)| {
+                let k = json_flatten_prefix(ua_key, key);
+                acc.insert(k, ua_val);
+            });
+        }
+    }
 }
 
 fn adjust_agent_id(key: &str, acc: &mut HashMap<String, JsonValue>) {
@@ -702,6 +714,26 @@ async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfi
     }
 
     Ok(())
+}
+
+fn convert_ua_to_json(ua_str: &str) -> Result<HashMap<&'static str, JsonValue>, anyhow::Error> {
+    let result = woothee::parser::Parser::new().parse(ua_str);
+
+    result
+        .as_ref()
+        .ok_or_else(|| format_err!("Failed to parse user agent"))
+        .and_then(|ua| {
+            let mut ua_map: HashMap<&'static str, JsonValue> = HashMap::new();
+            ua_map.insert("name", serde_json::to_value(ua.name)?);
+            ua_map.insert("category", serde_json::to_value(ua.category)?);
+            ua_map.insert("os", serde_json::to_value(ua.os)?);
+            ua_map.insert("os_version", serde_json::to_value(ua.os_version.as_ref())?);
+            ua_map.insert("browser_type", serde_json::to_value(ua.browser_type)?);
+            ua_map.insert("version", serde_json::to_value(ua.version)?);
+            ua_map.insert("vendor", serde_json::to_value(ua.vendor)?);
+
+            Ok(ua_map)
+        })
 }
 
 ////////////////////////////////////////////////////////////////////////////////
