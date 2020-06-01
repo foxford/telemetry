@@ -478,8 +478,15 @@ pub(crate) async fn run() -> Result<()> {
                 AgentNotification::Message(message, metadata) => {
                     let topic: &str = &metadata.topic;
 
-                    let result =
-                        handle_message(&client, &agent_id, topic, &message, topmind.clone()).await;
+                    let result = handle_message(
+                        &client,
+                        &agent_id,
+                        topic,
+                        &message,
+                        topmind.clone(),
+                        agent.get_queue_counter(),
+                    )
+                    .await;
 
                     if let Err(err) = result {
                         error!(
@@ -538,6 +545,7 @@ async fn handle_message(
     topic: &str,
     message: &Result<IncomingMessage<String>, String>,
     topmind: Arc<TopMindConfig>,
+    qc_handle: svc_agent::queue_counter::QueueCounterHandle,
 ) -> Result<()> {
     let mut acc: HashMap<String, JsonValue> = HashMap::new();
 
@@ -589,11 +597,18 @@ async fn handle_message(
 
                 let json_payload = IncomingEvent::convert_payload::<JsonValue>(event)
                     .context("Failed to serialize message payload")?;
+                let json_payload = if event.properties().label() == Some("metric.pull") {
+                    let metrics = metrics::get_metrics(qc_handle, json_payload)?;
+                    serde_json::to_value(metrics).context("Failed to serialize message payload")?
+                } else {
+                    json_payload
+                };
 
                 let telemetry_topic =
                     Subscription::multicast_requests_from(event.properties(), Some(API_VERSION))
                         .subscription_topic(agent_id, API_VERSION)
                         .context("Error building telemetry subscription topic")?;
+
                 // Telemetry only events: send entire payload.
                 if topic == telemetry_topic {
                     if let Some(json_payload_array) = json_payload.as_array() {
@@ -692,3 +707,4 @@ async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfi
 ////////////////////////////////////////////////////////////////////////////////
 
 mod config;
+mod metrics;
