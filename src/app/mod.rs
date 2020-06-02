@@ -311,12 +311,8 @@ fn adjust_payload(acc: &mut HashMap<String, JsonValue>) {
 
 fn adjust_useragent_tag(key: &str, acc: &mut HashMap<String, JsonValue>) {
     if let Some(JsonValue::String(ua_str)) = acc.get(key) {
-        if let Ok(mut ua_json) = convert_ua_to_json(&ua_str) {
-            ua_json.drain().for_each(|(ua_key, ua_val)| {
-                let k = json_flatten_prefix(ua_key, key);
-                acc.insert(k, ua_val);
-            });
-        }
+        let ua_str = ua_str.to_owned();
+        append_ua_keys_to_json(&ua_str, key, acc);
     }
 }
 
@@ -714,24 +710,37 @@ async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfi
     Ok(())
 }
 
-fn convert_ua_to_json(ua_str: &str) -> Result<HashMap<&'static str, JsonValue>, anyhow::Error> {
-    let result = woothee::parser::Parser::new().parse(ua_str);
-
-    result
-        .as_ref()
-        .ok_or_else(|| format_err!("Failed to parse user agent"))
-        .and_then(|ua| {
-            let mut ua_map: HashMap<&'static str, JsonValue> = HashMap::new();
-            ua_map.insert("name", serde_json::to_value(ua.name)?);
-            ua_map.insert("category", serde_json::to_value(ua.category)?);
-            ua_map.insert("os", serde_json::to_value(ua.os)?);
-            ua_map.insert("os_version", serde_json::to_value(ua.os_version.as_ref())?);
-            ua_map.insert("browser_type", serde_json::to_value(ua.browser_type)?);
-            ua_map.insert("version", serde_json::to_value(ua.version)?);
-            ua_map.insert("vendor", serde_json::to_value(ua.vendor)?);
-
-            Ok(ua_map)
-        })
+fn append_ua_keys_to_json(ua_str: &str, key: &str, acc: &mut HashMap<String, JsonValue>) {
+    if let Some(ua) = woothee::parser::Parser::new().parse(ua_str) {
+        acc.insert(
+            json_flatten_prefix("name", key),
+            serde_json::to_value(ua.name).expect("String serialization cant fail"),
+        );
+        acc.insert(
+            json_flatten_prefix("category", key),
+            serde_json::to_value(ua.category).expect("String serialization cant fail"),
+        );
+        acc.insert(
+            json_flatten_prefix("os", key),
+            serde_json::to_value(ua.os).expect("String serialization cant fail"),
+        );
+        acc.insert(
+            json_flatten_prefix("os_version", key),
+            serde_json::to_value(ua.os_version.as_ref()).expect("String serialization cant fail"),
+        );
+        acc.insert(
+            json_flatten_prefix("browser_type", key),
+            serde_json::to_value(ua.browser_type).expect("String serialization cant fail"),
+        );
+        acc.insert(
+            json_flatten_prefix("version", key),
+            serde_json::to_value(ua.version).expect("String serialization cant fail"),
+        );
+        acc.insert(
+            json_flatten_prefix("vendor", key),
+            serde_json::to_value(ua.vendor).expect("String serialization cant fail"),
+        );
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
