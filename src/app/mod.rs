@@ -1,15 +1,6 @@
 use anyhow::{format_err, Context, Result};
-use async_std::{stream, stream::StreamExt, sync::channel, task};
-use std::{
-    collections::HashMap,
-    str::FromStr,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    thread,
-    time::Duration,
-};
+use async_std::{stream::StreamExt, sync::channel, task};
+use std::{collections::HashMap, str::FromStr, sync::Arc, thread};
 
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info, warn};
@@ -460,17 +451,7 @@ pub(crate) async fn run() -> Result<()> {
             .build()?,
     );
 
-    // Throughput counters
-    let incoming_throughput = Arc::new(AtomicUsize::new(0));
-    let outgoing_throughput = Arc::new(AtomicUsize::new(0));
-    task::spawn(reset(
-        incoming_throughput.clone(),
-        outgoing_throughput.clone(),
-    ));
-
     while let Some(message) = mq_rx.next().await {
-        incoming_throughput.fetch_add(1, Ordering::SeqCst);
-        let outgoing_throughput = outgoing_throughput.clone();
         let client = client.clone();
         let mut agent = agent.clone();
         let agent_id = agent_id.clone();
@@ -514,32 +495,11 @@ pub(crate) async fn run() -> Result<()> {
 
                         sentry::send(svc_error)
                             .unwrap_or_else(|err| warn!("Error sending error to Sentry: {}", err));
-                    } else {
-                        outgoing_throughput.fetch_add(1, Ordering::SeqCst);
                     }
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
             }
         });
-    }
-
-    Ok(())
-}
-
-async fn reset(
-    incoming: Arc<AtomicUsize>,
-    outgoing: Arc<AtomicUsize>,
-) -> Result<(), std::io::Error> {
-    let mut interval = stream::interval(Duration::from_secs(1));
-    while let Some(_) = interval.next().await {
-        let now = chrono::offset::Utc::now();
-
-        info!(
-            "{} | throughput: {} => {}",
-            now,
-            incoming.swap(0, Ordering::SeqCst),
-            outgoing.swap(0, Ordering::SeqCst)
-        );
     }
 
     Ok(())
