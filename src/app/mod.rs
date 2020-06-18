@@ -534,7 +534,7 @@ async fn reset(
     while let Some(_) = interval.next().await {
         let now = chrono::offset::Utc::now();
 
-        println!(
+        info!(
             "{} | throughput: {} => {}",
             now,
             incoming.swap(0, Ordering::SeqCst),
