@@ -629,7 +629,7 @@ async fn try_send(
 
         match send(client, payload, topmind).await {
             ok @ Ok(_) => return ok,
-            Err(err) => errors.push(err.to_string()),
+            Err(err) => errors.push(format!("{:?}", err)),
         }
     }
 
