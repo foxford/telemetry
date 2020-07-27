@@ -1,7 +1,11 @@
 ## -----------------------------------------------------------------------------
 ## Build
 ## -----------------------------------------------------------------------------
-FROM clux/muslrust:stable as build-stage
+FROM rust:1.45.0-slim-buster as build-stage
+
+RUN apt update && apt install -y --no-install-recommends \
+  pkg-config \
+  libssl-dev
 
 WORKDIR "/build"
 COPY . .
@@ -10,9 +14,13 @@ RUN cargo build --release
 ## -----------------------------------------------------------------------------
 ## Package
 ## -----------------------------------------------------------------------------
-FROM alpine
+FROM debian:buster
 
-COPY --from=build-stage "/build/target/x86_64-unknown-linux-musl/release/telemetry" "/app/telemetry"
+RUN apt update && apt install -y --no-install-recommends \
+  ca-certificates \
+  libssl1.1
+
+COPY --from=build-stage "/build/target/release/telemetry" "/app/telemetry"
 
 WORKDIR "/app"
 ENTRYPOINT ["/app/telemetry"]
