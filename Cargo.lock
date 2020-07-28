@@ -1843,9 +1843,9 @@ dependencies = [
 
 [[package]]
 name = "svc-agent"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b12ed3427b18b7b46f3e411a5c283936ec6c035e07e09c918b24f52fdbf5a73b"
+checksum = "5f2738dd049659190cf8ce638698c5dd0b245f9c8403dd58ed2f3fadf4edfea2"
 dependencies = [
  "base64 0.10.1",
  "chrono",
@@ -1939,7 +1939,7 @@ dependencies = [
  "serde 1.0.106",
  "serde_derive",
  "serde_json",
- "svc-agent 0.13.1",
+ "svc-agent 0.13.2",
  "svc-authn",
  "svc-error",
  "woothee",
