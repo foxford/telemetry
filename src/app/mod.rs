@@ -477,8 +477,7 @@ pub(crate) async fn run() -> Result<()> {
 
                     if let Err(err) = result {
                         error!(
-                            "Error processing a message = '{text:?}' sent to the topic = '{topic}', {detail}",
-                            text = message,
+                            "Error processing a message sent to the topic = '{topic}', {detail}",
                             topic = topic,
                             detail = err,
                         );
