@@ -384,9 +384,26 @@ fn replace_integer(key: &str, acc: &mut HashMap<String, JsonValue>) {
 
 fn subscribe(agent: &mut Agent) {
     let group = SharedGroup::new("loadbalancer", agent.id().as_account_id().clone());
-    agent
-        .subscribe(&"apps/+/api/+/#", QoS::AtMostOnce, Some(&group))
-        .expect("Error subscribing to broadcast events");
+    // FIXME: Subscribe to all messages.
+    // agent
+    //     .subscribe(&"apps/+/api/+/#", QoS::AtMostOnce, Some(&group))
+    //     .expect("Error subscribing to broadcast events");
+    // agent
+    //     .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
+    //     .expect("Error subscribing to multicast requests and events");
+    // agent
+    //     .subscribe(&"agents/+/api/+/in/+", QoS::AtMostOnce, Some(&group))
+    //     .expect("Error subscribing to unicast requests and responses");
+
+    // FIXME: subscribe to telemetry events and unicast requests and responses for now.
+    // agent
+    //     .subscribe(
+    //         &Subscription::multicast_requests(Some(API_VERSION)),
+    //         QoS::AtMostOnce,
+    //         Some(&group),
+    //     )
+    //     .context("Error subscribing to multicast requests")
+    //     .expect("Error subscribing to broadcast events");
     agent
         .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
         .expect("Error subscribing to multicast requests and events");
@@ -530,11 +547,12 @@ async fn handle_message(
                 json_flatten("properties", &json_properties, &mut acc);
                 adjust_request_properties(&mut acc);
 
-                let json_payload = IncomingRequest::convert_payload::<JsonValue>(req)
-                    .context("Failed to serialize message payload")?;
-                // For any request: send only first level key/value pairs from the message payload.
-                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-                adjust_payload(&mut acc);
+                // FIXME: Disable payload for requests & responses.
+                // let json_payload = IncomingRequest::convert_payload::<JsonValue>(req)
+                //     .context("Failed to serialize message payload")?;
+                // // For any request: send only first level key/value pairs from the message payload.
+                // json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                // adjust_payload(&mut acc);
 
                 let payload = serde_json::to_value(acc)?;
                 try_send(&client, payload, topmind).await
@@ -545,11 +563,12 @@ async fn handle_message(
                 json_flatten("properties", &json_properties, &mut acc);
                 adjust_response_properties(&mut acc);
 
-                let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
-                    .context("Failed to serialize message payload")?;
-                // For any response: send only first level key/value pairs from the message payload.
-                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-                adjust_payload(&mut acc);
+                // FIXME: Disable payload for requests & responses.
+                // let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
+                //     .context("Failed to serialize message payload")?;
+                // // For any response: send only first level key/value pairs from the message payload.
+                // json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                // adjust_payload(&mut acc);
 
                 let payload = serde_json::to_value(acc)?;
                 try_send(&client, payload, topmind).await
