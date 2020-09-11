@@ -12,17 +12,17 @@ pub struct MetricValue {
 #[derive(Serialize)]
 #[serde(tag = "metric")]
 pub enum Metric {
-    #[serde(rename(serialize = "apps.event.incoming_requests_total"))]
+    #[serde(rename(serialize = "incoming_requests_total"))]
     IncomingQueueRequests(MetricValue),
-    #[serde(rename(serialize = "apps.event.incoming_responses_total"))]
+    #[serde(rename(serialize = "incoming_responses_total"))]
     IncomingQueueResponses(MetricValue),
-    #[serde(rename(serialize = "apps.event.incoming_events_total"))]
+    #[serde(rename(serialize = "incoming_events_total"))]
     IncomingQueueEvents(MetricValue),
-    #[serde(rename(serialize = "apps.event.outgoing_requests_total"))]
+    #[serde(rename(serialize = "outgoing_requests_total"))]
     OutgoingQueueRequests(MetricValue),
-    #[serde(rename(serialize = "apps.event.outgoing_responses_total"))]
+    #[serde(rename(serialize = "outgoing_responses_total"))]
     OutgoingQueueResponses(MetricValue),
-    #[serde(rename(serialize = "apps.event.outgoing_events_total"))]
+    #[serde(rename(serialize = "outgoing_events_total"))]
     OutgoingQueueEvents(MetricValue),
 }
 
