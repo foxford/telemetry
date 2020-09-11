@@ -10,6 +10,7 @@ pub(crate) struct Config {
     pub(crate) broker_id: svc_agent::AccountId,
     pub(crate) mqtt: svc_agent::mqtt::AgentConfig,
     pub(crate) sentry: Option<svc_error::extension::sentry::Config>,
+    pub(crate) metrics_addr: Option<std::net::SocketAddr>,
 }
 
 pub(crate) fn load() -> Result<Config, config::ConfigError> {
