@@ -55,7 +55,7 @@ impl StatsRoute {
                 let route = route_;
 
                 let mut app = tide::with_state(route);
-                app.at("/")
+                app.at("/metrics")
                     .get(|req: tide::Request<StatsRoute>| async move {
                         match req.state().get_stats().await {
                             Ok(text) => {
