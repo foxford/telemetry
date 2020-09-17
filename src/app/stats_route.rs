@@ -9,7 +9,7 @@ use svc_authn::Authenticable;
 
 #[derive(Deserialize)]
 struct ExternalMetric {
-    pub value: Option<i64>,
+    pub value: Option<serde_json::Value>,
     #[serde(rename = "metric")]
     pub key: String,
 }
@@ -114,7 +114,7 @@ impl StatsRoute {
             .await
     }
 
-    fn collect_hashmap(map: &HashMap<(AgentId, String), Option<i64>>) -> String {
+    fn collect_hashmap(map: &HashMap<(AgentId, String), Option<serde_json::Value>>) -> String {
         let mut acc = String::from("");
         for ((agent_id, key), val) in map {
             if let Some(v) = val {
