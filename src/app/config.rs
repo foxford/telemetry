@@ -2,18 +2,18 @@ use serde_derive::Deserialize;
 use svc_authn::jose::Algorithm;
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct Config {
-    pub(crate) id: svc_agent::AccountId,
-    pub(crate) id_token: IdTokenConfig,
-    pub(crate) topmind: TopMindConfig,
-    pub(crate) agent_label: String,
-    pub(crate) broker_id: svc_agent::AccountId,
-    pub(crate) mqtt: svc_agent::mqtt::AgentConfig,
-    pub(crate) sentry: Option<svc_error::extension::sentry::Config>,
-    pub(crate) metrics_addr: Option<std::net::SocketAddr>,
+pub struct Config {
+    pub id: svc_agent::AccountId,
+    pub id_token: IdTokenConfig,
+    pub topmind: TopMindConfig,
+    pub agent_label: String,
+    pub broker_id: svc_agent::AccountId,
+    pub mqtt: svc_agent::mqtt::AgentConfig,
+    pub sentry: Option<svc_error::extension::sentry::Config>,
+    pub http: Option<HttpConfig>,
 }
 
-pub(crate) fn load() -> Result<Config, config::ConfigError> {
+pub fn load() -> Result<Config, config::ConfigError> {
     let mut parser = config::Config::default();
     parser.merge(config::File::with_name("App"))?;
     parser.merge(config::Environment::with_prefix("APP").separator("__"))?;
@@ -23,7 +23,7 @@ pub(crate) fn load() -> Result<Config, config::ConfigError> {
 ////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct IdTokenConfig {
+pub struct IdTokenConfig {
     #[serde(deserialize_with = "svc_authn::serde::algorithm")]
     pub algorithm: Algorithm,
     #[serde(deserialize_with = "svc_authn::serde::file")]
@@ -31,9 +31,14 @@ pub(crate) struct IdTokenConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TopMindConfig {
+pub struct TopMindConfig {
     pub uri: String,
     pub token: String,
     pub timeout: Option<u64>,
     pub retry: Option<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HttpConfig {
+    pub metrics_addr: std::net::SocketAddr,
 }
