@@ -276,7 +276,7 @@ pub(crate) async fn run() -> Result<()> {
     // Subscription
     subscribe(&mut agent);
 
-    let stats_route = config.metrics_addr.map(|addr| StatsRoute::start(addr));
+    let stats_route = config.http.map(|http| StatsRoute::start(http));
 
     // Http client
     let topmind = Arc::new(config.topmind);

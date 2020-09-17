@@ -25,7 +25,7 @@ enum StatsRouteCommand {
 }
 
 impl StatsRoute {
-    pub fn start(addr: std::net::SocketAddr) -> Self {
+    pub fn start(http: crate::app::config::HttpConfig) -> Self {
         let (tx, mut rx) = async_std::sync::channel(1000);
 
         async_std::task::spawn(async move {
@@ -51,7 +51,7 @@ impl StatsRoute {
         std::thread::Builder::new()
             .name(String::from("tide-metrics"))
             .spawn(move || {
-                warn!("StatsRoute listening on http://{}", addr);
+                warn!("StatsRoute listening on http://{}", http.metrics_addr);
                 let route = route_;
 
                 let mut app = tide::with_state(route);
@@ -74,7 +74,7 @@ impl StatsRoute {
                         }
                     });
 
-                if let Err(e) = async_std::task::block_on(app.listen(addr)) {
+                if let Err(e) = async_std::task::block_on(app.listen(http.metrics_addr)) {
                     error!("Tide future completed with error = {:?}", e);
                 }
             })
