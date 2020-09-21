@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use async_std::stream::StreamExt;
 use async_std::sync::Sender;
+use chrono::{serde::ts_seconds, DateTime, Utc};
 use log::{error, warn};
 use serde_derive::Deserialize;
 use svc_agent::AgentId;
@@ -12,7 +13,11 @@ struct ExternalMetric {
     pub value: Option<serde_json::Value>,
     #[serde(rename = "metric")]
     pub key: String,
+    #[serde(with = "ts_seconds")]
+    pub timestamp: DateTime<Utc>,
 }
+
+const METRIC_TTL: i64 = 8;
 
 #[derive(Clone)]
 pub struct StatsRoute {
@@ -35,10 +40,10 @@ impl StatsRoute {
                 if let Some(x) = rx.next().await {
                     match x {
                         StatsRouteCommand::AppendStat(agent_id, metric) => {
-                            s.entry((agent_id, metric.key)).or_insert(metric.value);
+                            s.entry((agent_id, metric.key.clone())).or_insert(metric);
                         }
                         StatsRouteCommand::GetStats(chan) => {
-                            chan.send(Self::collect_hashmap(&s)).await;
+                            chan.send(Self::collect_hashmap(&mut s)).await;
                         }
                     }
                 }
@@ -114,10 +119,14 @@ impl StatsRoute {
             .await
     }
 
-    fn collect_hashmap(map: &HashMap<(AgentId, String), Option<serde_json::Value>>) -> String {
+    fn collect_hashmap(map: &mut HashMap<(AgentId, String), ExternalMetric>) -> String {
         let mut acc = String::from("");
-        for ((agent_id, key), val) in map {
-            if let Some(v) = val {
+        let now = chrono::Utc::now();
+
+        map.retain(|_key, metric| (now - metric.timestamp).num_seconds() < METRIC_TTL);
+
+        for ((agent_id, key), ref metric) in map {
+            if let Some(ref v) = metric.value {
                 acc.push_str(&format!(
                     "{}{{agent_label=\"{}\",account_id=\"{}\"}} {}\n",
                     key,
