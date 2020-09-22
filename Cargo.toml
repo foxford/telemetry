@@ -21,4 +21,3 @@ svc-agent = { version = "0.14", features = ["queue-counter"] }
 svc-authn = { version = "0.6", features = ["jose"] }
 svc-error = { version = "0.1", features = ["svc-agent", "svc-authn", "sentry-extension"] }
 woothee = "0.11.0"
-tide = "0.13.0"
