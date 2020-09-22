@@ -1830,7 +1830,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-std",
