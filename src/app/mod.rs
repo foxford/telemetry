@@ -10,7 +10,7 @@ use svc_agent::mqtt::{
     Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, QoS, ResponseStatus,
     SubscriptionTopic,
 };
-use svc_agent::{Addressable, AgentId, Authenticable, SharedGroup, Subscription};
+use svc_agent::{AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::token::jws_compact;
 use svc_error::extension::sentry;
 
@@ -19,7 +19,6 @@ type ErrorKind = std::io::ErrorKind;
 
 use crate::app::config::TopMindConfig;
 use crate::app::messaging_pattern::MessagingPattern;
-use crate::app::stats_route::StatsRoute;
 use crate::app::top_mind_response::TopMindResponse;
 pub(crate) const API_VERSION: &str = "v1";
 const INTERNAL_MESSAGE_QUEUE_SIZE: usize = 1_000_000;
@@ -276,8 +275,6 @@ pub(crate) async fn run() -> Result<()> {
     // Subscription
     subscribe(&mut agent);
 
-    let stats_route = config.http.map(|http| StatsRoute::start(http));
-
     // Http client
     let topmind = Arc::new(config.topmind);
     let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
@@ -295,7 +292,6 @@ pub(crate) async fn run() -> Result<()> {
         let agent_id = agent_id.clone();
 
         let topmind = topmind.clone();
-        let stats_route = stats_route.clone();
         task::spawn(async move {
             match message {
                 AgentNotification::Reconnection => {
@@ -311,7 +307,6 @@ pub(crate) async fn run() -> Result<()> {
                         &message,
                         topmind.clone(),
                         agent.get_queue_counter(),
-                        stats_route,
                     )
                     .await;
 
@@ -351,7 +346,6 @@ async fn handle_message(
     message: &Result<IncomingMessage<String>, String>,
     topmind: Arc<TopMindConfig>,
     qc_handle: svc_agent::queue_counter::QueueCounterHandle,
-    stats_route: Option<StatsRoute>,
 ) -> Result<()> {
     let mut acc: HashMap<String, JsonValue> = HashMap::new();
 
@@ -426,16 +420,6 @@ async fn handle_message(
                 // Since we "shortcircuit" metric.pull event handling by substituting payload
                 // we consider this event as "telemetry only" too, since we need to submit entire payload
                 if topic == telemetry_topic || label == Some("metric.pull") {
-                    if let Some(stats_route) = stats_route {
-                        let sender = if label == Some("metric.pull") {
-                            // Consider self as sender
-                            agent_id
-                        } else {
-                            &event.properties().as_agent_id()
-                        };
-                        stats_route.update_with_value(&json_payload, &sender).await;
-                    }
-
                     if let Some(json_payload_array) = json_payload.as_array() {
                         // Send multiple metrics.
                         for json_payload_object in json_payload_array {
@@ -567,5 +551,4 @@ fn append_ua_keys_to_json(ua_str: &str, key: &str, acc: &mut HashMap<String, Jso
 mod config;
 mod messaging_pattern;
 mod metrics;
-mod stats_route;
 mod top_mind_response;

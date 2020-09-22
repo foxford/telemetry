@@ -10,7 +10,6 @@ pub struct Config {
     pub broker_id: svc_agent::AccountId,
     pub mqtt: svc_agent::mqtt::AgentConfig,
     pub sentry: Option<svc_error::extension::sentry::Config>,
-    pub http: Option<HttpConfig>,
 }
 
 pub fn load() -> Result<Config, config::ConfigError> {
@@ -36,9 +35,4 @@ pub struct TopMindConfig {
     pub token: String,
     pub timeout: Option<u64>,
     pub retry: Option<u8>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct HttpConfig {
-    pub metrics_addr: std::net::SocketAddr,
 }
