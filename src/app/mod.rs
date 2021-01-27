@@ -223,6 +223,9 @@ fn subscribe(agent: &mut Agent) {
     //     .context("Error subscribing to multicast requests")
     //     .expect("Error subscribing to broadcast events");
     agent
+        .subscribe(&"apps/+/api/+/audiences/#", QoS::AtMostOnce, Some(&group))
+        .expect("Error subscribing to broadcast audience events");
+    agent
         .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
         .expect("Error subscribing to multicast requests and events");
     agent
