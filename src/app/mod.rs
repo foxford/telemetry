@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use serde_json::{json, Value as JsonValue};
 use svc_agent::mqtt::AgentNotification;
 use svc_agent::mqtt::{
-    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, QoS, ResponseStatus,
+    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, IncomingResponse, QoS, ResponseStatus,
     SubscriptionTopic,
 };
 use svc_agent::{AgentId, Authenticable, SharedGroup, Subscription};
@@ -384,12 +384,11 @@ async fn handle_message(
                 json_flatten("properties", &json_properties, &mut acc);
                 adjust_response_properties(&mut acc);
 
-                // FIXME: Disable payload for requests & responses.
-                // let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
-                //     .context("Failed to serialize message payload")?;
-                // // For any response: send only first level key/value pairs from the message payload.
-                // json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-                // adjust_payload(&mut acc);
+                let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
+                    .context("Failed to serialize message payload")?;
+                // For any response: send only first level key/value pairs from the message payload.
+                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                adjust_payload(&mut acc);
 
                 let payload = serde_json::to_value(acc)?;
                 try_send(&client, payload, topmind).await
