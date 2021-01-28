@@ -9,7 +9,6 @@ pub struct Config {
     pub agent_label: String,
     pub broker_id: svc_agent::AccountId,
     pub mqtt: svc_agent::mqtt::AgentConfig,
-    pub sentry: Option<svc_error::extension::sentry::Config>,
 }
 
 pub fn load() -> Result<Config, config::ConfigError> {
