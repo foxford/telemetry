@@ -1,18 +1,17 @@
 use anyhow::{format_err, Context, Result};
-use async_std::{stream::StreamExt, sync::channel, task};
+use async_std::{stream::StreamExt, channel, task};
 use std::{collections::HashMap, sync::Arc, thread};
 
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
-use log::{error, info, warn};
+use log::{error, info};
 use serde_json::{json, Value as JsonValue};
 use svc_agent::mqtt::AgentNotification;
 use svc_agent::mqtt::{
-    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, IncomingResponse, QoS, ResponseStatus,
+    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, QoS,
     SubscriptionTopic,
 };
 use svc_agent::{AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::token::jws_compact;
-use svc_error::extension::sentry;
 
 type Error = std::io::Error;
 type ErrorKind = std::io::ErrorKind;
@@ -260,20 +259,17 @@ pub(crate) async fn run() -> Result<()> {
         .context("Failed to create an agent")?;
 
     // Message loop for incoming messages of MQTT Agent
-    let (mq_tx, mut mq_rx) = channel(INTERNAL_MESSAGE_QUEUE_SIZE);
+    let (mq_tx, mut mq_rx) = channel::bounded(INTERNAL_MESSAGE_QUEUE_SIZE);
     thread::spawn(move || {
         for message in rx {
             let mq_tx = mq_tx.clone();
             task::spawn(async move {
-                mq_tx.send(message).await;
+                if mq_tx.send(message).await.is_err() {
+                    error!("Error sending message to the internal channel");
+                }
             });
         }
     });
-
-    // Sentry
-    if let Some(sentry_config) = config.sentry.as_ref() {
-        svc_error::extension::sentry::init(sentry_config);
-    }
 
     // Subscription
     subscribe(&mut agent);
@@ -309,7 +305,6 @@ pub(crate) async fn run() -> Result<()> {
                         topic,
                         &message,
                         topmind.clone(),
-                        agent.get_queue_counter(),
                     )
                     .await;
 
@@ -319,19 +314,6 @@ pub(crate) async fn run() -> Result<()> {
                             topic = topic,
                             detail = err,
                         );
-
-                        // Send to the Sentry
-                        let svc_error = svc_error::Error::builder()
-                            .kind(
-                                "topmind.wapi",
-                                "Error publishing a message to the TopMind W API",
-                            )
-                            .status(ResponseStatus::UNPROCESSABLE_ENTITY)
-                            .detail(&err.to_string())
-                            .build();
-
-                        sentry::send(svc_error)
-                            .unwrap_or_else(|err| warn!("Error sending error to Sentry: {}", err));
                     }
                 }
                 _ => error!("An unsupported type of message = '{:?}'", message),
@@ -348,7 +330,6 @@ async fn handle_message(
     topic: &str,
     message: &Result<IncomingMessage<String>, String>,
     topmind: Arc<TopMindConfig>,
-    qc_handle: svc_agent::queue_counter::QueueCounterHandle,
 ) -> Result<()> {
     let mut acc: HashMap<String, JsonValue> = HashMap::new();
 
@@ -368,7 +349,7 @@ async fn handle_message(
                 json_flatten("properties", &json_properties, &mut acc);
                 adjust_request_properties(&mut acc);
 
-                // FIXME: Disable payload for requests & responses.
+                // NOTE: We don't parse message payload for requests & responses.
                 // let json_payload = IncomingRequest::convert_payload::<JsonValue>(req)
                 //     .context("Failed to serialize message payload")?;
                 // // For any request: send only first level key/value pairs from the message payload.
@@ -376,6 +357,7 @@ async fn handle_message(
                 // adjust_payload(&mut acc);
 
                 let payload = serde_json::to_value(acc)?;
+                print!("{:?}", payload);
                 try_send(&client, payload, topmind).await
             }
             IncomingMessage::Response(ref resp) => {
@@ -384,11 +366,12 @@ async fn handle_message(
                 json_flatten("properties", &json_properties, &mut acc);
                 adjust_response_properties(&mut acc);
 
-                let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
-                    .context("Failed to serialize message payload")?;
-                // For any response: send only first level key/value pairs from the message payload.
-                json_flatten_one_level_deep("payload", &json_payload, &mut acc);
-                adjust_payload(&mut acc);
+                // NOTE: We don't parse message payload for requests & responses.
+                // let json_payload = IncomingResponse::convert_payload::<JsonValue>(resp)
+                //     .context("Failed to serialize message payload")?;
+                // // For any response: send only first level key/value pairs from the message payload.
+                // json_flatten_one_level_deep("payload", &json_payload, &mut acc);
+                // adjust_payload(&mut acc);
 
                 let payload = serde_json::to_value(acc)?;
                 try_send(&client, payload, topmind).await
@@ -399,18 +382,8 @@ async fn handle_message(
                 json_flatten("properties", &json_properties, &mut acc);
                 adjust_event_properties(&mut acc);
 
-                let label = event.properties().label();
                 let json_payload = IncomingEvent::convert_payload::<JsonValue>(event)
                     .context("Failed to serialize message payload")?;
-
-                // If the event was metric.pull then we use current telemetry metrics as payload
-                // instead of sending telemetry metrics to telemetry again
-                let json_payload = if label == Some("metric.pull") {
-                    let metrics = metrics::get_metrics(qc_handle, json_payload)?;
-                    serde_json::to_value(metrics).context("Failed to serialize message payload")?
-                } else {
-                    json_payload
-                };
 
                 let telemetry_topic =
                     Subscription::multicast_requests_from(event.properties(), Some(API_VERSION))
@@ -418,10 +391,7 @@ async fn handle_message(
                         .context("Error building telemetry subscription topic")?;
 
                 // Telemetry only events: send entire payload.
-                //
-                // Since we "shortcircuit" metric.pull event handling by substituting payload
-                // we consider this event as "telemetry only" too, since we need to submit entire payload
-                if topic == telemetry_topic || label == Some("metric.pull") {
+                if topic == telemetry_topic {
                     if let Some(json_payload_array) = json_payload.as_array() {
                         // Send multiple metrics.
                         for json_payload_object in json_payload_array {
@@ -552,5 +522,4 @@ fn append_ua_keys_to_json(ua_str: &str, key: &str, acc: &mut HashMap<String, Jso
 
 mod config;
 mod messaging_pattern;
-mod metrics;
 mod top_mind_response;
