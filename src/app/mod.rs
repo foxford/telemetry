@@ -357,7 +357,6 @@ async fn handle_message(
                 // adjust_payload(&mut acc);
 
                 let payload = serde_json::to_value(acc)?;
-                print!("{:?}", payload);
                 try_send(&client, payload, topmind).await
             }
             IncomingMessage::Response(ref resp) => {
@@ -455,6 +454,7 @@ async fn try_send(
 async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfig>) -> Result<()> {
     use isahc::prelude::*;
 
+    let tracking_id = payload.get("properties.tracking_id").map(|val| val.to_string()).unwrap_or_else(|| String::from("None"));
     let body = serde_json::to_string(&payload).context("Failed to build TopMind request")?;
     let req = Request::post(&topmind.uri)
         .header("authorization", format!("Bearer {}", topmind.token))
@@ -467,7 +467,7 @@ async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfi
     let mut resp = client
         .send_async(req)
         .await
-        .context("Error sending the TopMind request")?;
+        .context(format!("Error sending the TopMind request with tracking_id={}", tracking_id))?;
     let data = resp
         .text_async()
         .await
