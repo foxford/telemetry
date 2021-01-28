@@ -1,5 +1,5 @@
 use anyhow::{format_err, Context, Result};
-use async_std::{stream::StreamExt, channel, task};
+use async_std::{channel, stream::StreamExt, task};
 use std::{collections::HashMap, sync::Arc, thread};
 
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
@@ -7,8 +7,7 @@ use log::{error, info};
 use serde_json::{json, Value as JsonValue};
 use svc_agent::mqtt::AgentNotification;
 use svc_agent::mqtt::{
-    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, QoS,
-    SubscriptionTopic,
+    Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, QoS, SubscriptionTopic,
 };
 use svc_agent::{AgentId, Authenticable, SharedGroup, Subscription};
 use svc_authn::token::jws_compact;
@@ -299,14 +298,8 @@ pub(crate) async fn run() -> Result<()> {
                 AgentNotification::Message(message, metadata) => {
                     let topic: &str = &metadata.topic;
 
-                    let result = handle_message(
-                        &client,
-                        &agent_id,
-                        topic,
-                        &message,
-                        topmind.clone(),
-                    )
-                    .await;
+                    let result =
+                        handle_message(&client, &agent_id, topic, &message, topmind.clone()).await;
 
                     if let Err(err) = result {
                         error!(
@@ -454,7 +447,10 @@ async fn try_send(
 async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfig>) -> Result<()> {
     use isahc::prelude::*;
 
-    let tracking_id = payload.get("properties.tracking_id").map(|val| val.to_string()).unwrap_or_else(|| String::from("None"));
+    let tracking_id = payload
+        .get("properties.tracking_id")
+        .map(|val| val.to_string())
+        .unwrap_or_else(|| String::from("None"));
     let body = serde_json::to_string(&payload).context("Failed to build TopMind request")?;
     let req = Request::post(&topmind.uri)
         .header("authorization", format!("Bearer {}", topmind.token))
@@ -464,10 +460,10 @@ async fn send(client: &HttpClient, payload: JsonValue, topmind: Arc<TopMindConfi
         .header("user-agent", "telemetry")
         .body(body)?;
 
-    let mut resp = client
-        .send_async(req)
-        .await
-        .context(format!("Error sending the TopMind request with tracking_id={}", tracking_id))?;
+    let mut resp = client.send_async(req).await.context(format!(
+        "Error sending the TopMind request with tracking_id={}",
+        tracking_id
+    ))?;
     let data = resp
         .text_async()
         .await
