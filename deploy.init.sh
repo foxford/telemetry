@@ -43,6 +43,7 @@ FILE_FROM_GITHUB "deploy/k8s/base" "${SOURCE}/apps/deploy/${PROJECT}/base/${PROJ
 FILE_FROM_GITHUB "deploy/k8s/base" "${SOURCE}/apps/deploy/${PROJECT}/base/${PROJECT}.yaml"
 FILE_FROM_GITHUB "deploy/k8s/base/configs" "${SOURCE}/apps/deploy/${PROJECT}/base/configs/env.ini"
 FILE_FROM_GITHUB "deploy/k8s/base/patches" "${SOURCE}/apps/deploy/${PROJECT}/base/patches/update-replica-resources.yaml"
+FILE_FROM_GITHUB "deploy/k8s/base/patches" "${SOURCE}/apps/deploy/${PROJECT}/base/patches/update-tolerations.yaml"
 FILE_FROM_GITHUB "deploy/k8s/base/patches" "${SOURCE}/apps/deploy/${PROJECT}/base/patches/environments.yaml"
 FILE_FROM_GITHUB "deploy/k8s/base/patches" "${SOURCE}/apps/deploy/${PROJECT}/base/patches/tenant-credentials.yaml"
 FILE_FROM_GITHUB "deploy/k8s/overlays/ns" "${SOURCE}/apps/deploy/${PROJECT}/overlays/${NAMESPACE}/kustomization.yaml"
