@@ -1475,6 +1475,7 @@ dependencies = [
  "serde 1.0.123",
  "serde_derive",
  "serde_json",
+ "signal-hook",
  "svc-agent",
  "svc-authn",
  "svc-error",

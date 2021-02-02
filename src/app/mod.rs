@@ -1,10 +1,15 @@
-use anyhow::{format_err, Context, Result};
+use anyhow::{anyhow, format_err, Context, Result};
 use async_std::{channel, stream::StreamExt, task};
-use std::{collections::HashMap, sync::Arc, thread};
-
 use isahc::{config::Configurable, config::VersionNegotiation, HttpClient};
 use log::{error, info};
 use serde_json::{json, Value as JsonValue};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicBool, Ordering},
+    sync::Arc,
+    thread,
+    time::Duration,
+};
 use svc_agent::mqtt::AgentNotification;
 use svc_agent::mqtt::{
     Agent, AgentBuilder, ConnectionMode, IncomingEvent, IncomingMessage, QoS, SubscriptionTopic,
@@ -19,9 +24,9 @@ use crate::app::config::TopMindConfig;
 use crate::app::messaging_pattern::MessagingPattern;
 use crate::app::top_mind_response::TopMindResponse;
 pub(crate) const API_VERSION: &str = "v1";
-const INTERNAL_MESSAGE_QUEUE_SIZE: usize = 1_000_000;
 const MAX_HTTP_CONNECTION: usize = 256;
 const MAX_ATTEMPTS: u8 = 3;
+const DEFAULT_HTTP_TIMEOUT: u64 = 5;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -211,24 +216,17 @@ fn subscribe(agent: &mut Agent) {
     //     .subscribe(&"agents/+/api/+/in/+", QoS::AtMostOnce, Some(&group))
     //     .expect("Error subscribing to unicast requests and responses");
 
-    // FIXME: subscribe to telemetry events and unicast requests and responses for now.
-    // agent
-    //     .subscribe(
-    //         &Subscription::multicast_requests(Some(API_VERSION)),
-    //         QoS::AtMostOnce,
-    //         Some(&group),
-    //     )
-    //     .context("Error subscribing to multicast requests")
-    //     .expect("Error subscribing to broadcast events");
+    // Subscribe to audience-level and telemetry events only.
     agent
         .subscribe(&"apps/+/api/+/audiences/#", QoS::AtMostOnce, Some(&group))
         .expect("Error subscribing to broadcast audience events");
     agent
-        .subscribe(&"agents/+/api/+/out/+", QoS::AtMostOnce, Some(&group))
-        .expect("Error subscribing to multicast requests and events");
-    agent
-        .subscribe(&"agents/+/api/+/in/+", QoS::AtMostOnce, Some(&group))
-        .expect("Error subscribing to unicast requests and responses");
+        .subscribe(
+            &Subscription::multicast_requests(Some(API_VERSION)),
+            QoS::AtMostOnce,
+            Some(&group),
+        )
+        .expect("Error subscribing to telemetry events");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -258,7 +256,7 @@ pub(crate) async fn run() -> Result<()> {
         .context("Failed to create an agent")?;
 
     // Message loop for incoming messages of MQTT Agent
-    let (mq_tx, mut mq_rx) = channel::bounded(INTERNAL_MESSAGE_QUEUE_SIZE);
+    let (mq_tx, mut mq_rx) = channel::unbounded();
     thread::spawn(move || {
         for message in rx {
             let mq_tx = mq_tx.clone();
@@ -275,7 +273,7 @@ pub(crate) async fn run() -> Result<()> {
 
     // Http client
     let topmind = Arc::new(config.topmind);
-    let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(5));
+    let timeout = std::time::Duration::from_secs(topmind.timeout.unwrap_or(DEFAULT_HTTP_TIMEOUT));
     let client = Arc::new(
         HttpClient::builder()
             .version_negotiation(VersionNegotiation::http11())
@@ -284,34 +282,52 @@ pub(crate) async fn run() -> Result<()> {
             .build()?,
     );
 
-    while let Some(message) = mq_rx.next().await {
-        let client = client.clone();
-        let mut agent = agent.clone();
-        let agent_id = agent_id.clone();
+    // Message loop
+    let term_check_period = Duration::from_secs(1);
+    let term = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::SIGTERM, Arc::clone(&term))?;
+    signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&term))?;
+    while !term.load(Ordering::Relaxed) {
+        let fut = async_std::future::timeout(term_check_period, mq_rx.next());
 
-        let topmind = topmind.clone();
-        task::spawn(async move {
-            match message {
-                AgentNotification::Reconnection => {
-                    subscribe(&mut agent);
-                }
-                AgentNotification::Message(message, metadata) => {
-                    let topic: &str = &metadata.topic;
+        if let Ok(Some(message)) = fut.await {
+            let client = client.clone();
+            let mut agent = agent.clone();
+            let agent_id = agent_id.clone();
+            let topmind = topmind.clone();
 
-                    let result =
-                        handle_message(&client, &agent_id, topic, &message, topmind.clone()).await;
+            task::spawn(async move {
+                match message {
+                    AgentNotification::Message(message, metadata) => {
+                        let topic: &str = &metadata.topic;
 
-                    if let Err(err) = result {
-                        error!(
-                            "Error processing a message sent to the topic = '{topic}', {detail}",
-                            topic = topic,
-                            detail = err,
-                        );
+                        let result =
+                            handle_message(&client, &agent_id, topic, &message, topmind.clone())
+                                .await;
+
+                        if let Err(err) = result {
+                            error!(
+                                "Error processing a message sent to the topic = '{topic}', {detail}",
+                                topic = topic,
+                                detail = err,
+                            );
+                        }
+                    }
+                    AgentNotification::Disconnection => error!("Disconnected from broker"),
+                    AgentNotification::Reconnection => {
+                        subscribe(&mut agent);
+                    }
+                    AgentNotification::Puback(_) => (),
+                    AgentNotification::Pubrec(_) => (),
+                    AgentNotification::Pubcomp(_) => (),
+                    AgentNotification::Suback(_) => (),
+                    AgentNotification::Unsuback(_) => (),
+                    AgentNotification::Abort(err) => {
+                        error!("{}", anyhow!("MQTT client aborted: {}", err))
                     }
                 }
-                _ => error!("An unsupported type of message = '{:?}'", message),
-            }
-        });
+            });
+        }
     }
 
     Ok(())
