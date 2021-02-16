@@ -1,19 +1,14 @@
 language: rust
-rust:
-  - stable
-# addons:
-#   apt:
-#     packages:
-#       - awscli
-cache:
-  directories:
-    - ${TRAVIS_HOME}/.cargo
-before_cache:
-  - rm -rf ${TRAVIS_HOME}/.cargo/registry
+rust: stable
+
+cache: cargo
+
 services:
   - docker
+
 git:
   depth: 1
+
 jobs:
   include:
   - stage: check
@@ -27,16 +22,25 @@ jobs:
     name: Clippy
     install: rustup component add clippy
     script: cargo clippy
-    # - stage: check
+    # NOTE: there isn't any doc yet.
+    # - stage: build
     #   name: Docs
-    #   install: cargo install mdbook --vers 0.3.5 --force
-    #   script: mdbook build docs && ./deploy.init.sh && PROJECT='telemetry' ./deploy/s3-docs.sh
-  - stage: deploy
-    name: Kubernetes
-    script: ./deploy.init.sh && ./deploy/travis-run.sh
+    #   install: cargo install mdbook --vers ^0.4
+    #   script:
+    #     - ./deploy.init.sh
+    #     - mdbook build docs
+    #     - ./deploy/ci-mdbook.sh
+    - stage: build
+      name: Build
+      script:
+        - ./deploy.init.sh
+        - ./deploy/ci-install-tools.sh
+        - ./deploy/ci-build.sh
+
 stages:
   - name: check
-  - name: deploy
-    if: (branch = master AND type = push) OR tag IS present
+  - name: build
+    if: branch = master AND type = push
+
 notifications:
   email: false
