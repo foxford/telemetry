@@ -2,7 +2,7 @@ apiVersion: skaffold/v2beta11
 kind: Config
 build:
   artifacts:
-  - image: netologygroup/telemetry
+  - image: foxford/telemetry
     docker:
       dockerfile: docker/Dockerfile
   tagPolicy:
