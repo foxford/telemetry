@@ -1,7 +1,5 @@
 # Telemetry
 
-[![Build Status][travis-img]][travis]
-
 The microservice is collecting telemetry data.
 
 
